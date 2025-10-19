@@ -1,0 +1,9 @@
+[submodule "tools/rgss-decryptor"]
+	path = tools/rgss-decryptor
+	url = https://github.com/ddCeka/RGSS-Decryptor.git
+[submodule "tools/rpatool"]
+	path = tools/rpatool
+	url = https://github.com/ddCeka/rpatool.git
+[submodule "tools/soldata-decryptor"]
+	path = tools/soldata-decryptor
+	url = https://github.com/ddCeka/soldata-decryptor.git
