@@ -66,13 +66,13 @@ The parameters are based on Windows script version (except that default WebP com
    replaces original archive, taking the same name including extension).
  * If [`MvDecryptor`][MvDecryptor] is detected, it can be used for batch decoding of RPGM (MV/MZ) resource files. (For
    MZ, additional adjustment is needed – [see below](#how-to-compress-rpg-maker-mz-games).)  
-   [!Note]:
+   > [!Note]:
    > apparently some devs hardcode encryption key into the game, making it ignore the one in config; so I added
-   print out in RPGM mode so that hopefully such cases are easily detected).
+   print out in RPGM mode so that hopefully such cases are easily detected.
  * RPGM VX Ace games are worked now; they don't support Web formats (in case of images, only JPEG/PNG), so
    compression level is not as good – size reduction is up to half, as opposed to a fifth for RenPy/MV/HTML games.
    (Also, if [`RgssDecryptor` script][RgssDecryptor script] is detected, it can be used for unpacking the game archive.)  
-   [!Note]:
+   > [!Note]:
    > video in games wasn't tested (as I haven't found an Ace game with a video resource to test if it works). Also,
    Ace doesn't support WebM, so ACCEL has no effect with it.
 
@@ -135,7 +135,7 @@ The script supports following parameters (either as environment variables or CLI
    system-wide location of `rpatool` or `rpatool.py` executable (if found, otherwise empty).
  * `$MVDECRYPTOR` contains path to [MvDecryptor][MvDecryptor] script (used for decryption of RPGM MV/MZ resource files).
    Defaults to system-wide location (if found, otherwise empty).
-   [!Note]:
+   > [!Note]:
    > see below for instruction on MZ games.
  * `$RGSSDECRYPTOR` contains path to [RgssDecryptor][RgssDecryptor script] script (used for decryption of RPGM Ace
    resource files). Defaults to system-wide location (if found, otherwise empty).
@@ -152,7 +152,7 @@ Make sure you have `bash`, `ffmpeg` and `imagemagick` installed; optionally also
 processing), [rpatool][rpatool] (for RPA files), [MvDecryptor][MvDecryptor] (for decrypting RPGM resources)
 
 Copy script (and symlinks) into `/usr/bin`, run simply as `cruncher` in console from unpacked game directory.  
-[!Note]
+> [!Note]
 > you can also copy script into unpacked game directory and run as `./cruncher` (or `./cruncher RenPy` etc. if you
 don't want autodetection).  
 
@@ -190,7 +190,7 @@ Note that `-p` is important – without the placeholder file it creates, the gam
     ```sh
     alias RgssDecryptor="mono /usr/lib/rpgm/RgssDecrypter.exe"
     ```
-    [!Note]:
+    > [!Note]:
     > the script is now included in directory.
 
 [How the executable was made][RgssDecryptor build]
@@ -236,7 +236,7 @@ Compression mode should be the same as for any HTML game.
 
 ### How to create a Linux version of an Electron game (untested)
 
-[!Note]
+> [!Note]
 > You can get electron package from `tur-repo` for preinstalled packages
 
 or
