@@ -61,7 +61,7 @@ function parse-args {
 				Usage: $0 [ -m MODE ] [ -d GAMEDIR ] [ -q QUALITY ] [ -w METHOD ] [ -o OPACITY] [ -t THREADS ] [ -l LOGLEVEL ] [ -p ] [ -1 ] [ MODE ]
 				    MODE	   RenPy | RPGM | Ace | Other (default is based on script name or detected)
 				    GAMEDIR	Folder to be scanned for updates (default is based on MODE: ./game | ./www | .)
-				    QUALITY	WebP/JPEG quality (default 75)
+				    QUALITY	WebP/JPEG quality (default 80)
 				    WMETHOD	WebP compression method (0-6, default 5; 6 is best quality, 0 is fastest)
 				    OPACITY	PNG transparency threshold (for JPEG conversion; default 20480=16.5%, maximum 65535)
 				    THREADS	ffmpeg threads (default 0 = 'optimal', or 1 with VPARALLEL)
@@ -170,7 +170,7 @@ function init {
 	: "${FFMPEG:=`which ffmpeg`}"
 	(( `echo "$(ffmpeg-version) < 5.1" | bc --mathlib` > 0 )) && FPSMODE='-vsync' || FPSMODE='-fps_mode'
 	: "${CONVERT:=`which magick`}"
-	: "${QUALITY:=75}"
+	: "${QUALITY:=80}"
 	: "${WMETHOD:=5}"
 	: "${OPACITY:=20480}"
 	[ "$PRETEND" = true ] || PRETEND=false

@@ -44,8 +44,7 @@ which
 Functionally it does the same thing as the original (Windows) script: re-encodes media files into lightweight formats
 (WebP for images, ogg/mp3 for audio, WebM for video) without changing file extensions, expecting the game to accept them
 quietly (which means it's unlikely to work on games that use a rigidly implemented engine).  
-The parameters are based on Windows script version (except that default WebP compression/quality was changed from 80% to
-75%, and ffmpeg thread count was changed to optimal detected).
+The parameters are based on Windows script version (except that ffmpeg thread count was changed to optimal detected).
 
  * Works for Ren'Py, RPGM (MV/MZ/VX Ace), and other (mainly HTML) games that support resource compression (or rather,
    detect file type by contents).
