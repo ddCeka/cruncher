@@ -1,0 +1,1 @@
+mono "$PREFIX/lib/rpgm/RgssDecrypter.exe" "$@"

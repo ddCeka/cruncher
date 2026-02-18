@@ -1,0 +1,557 @@
+#!/bin/bash
+# accepted vars: MODE (RenPy|RPGM|HTML), GAMEDIR (./game|./www|.), FFMPEG (`which ffmpeg`), CONVERT (`which magick`), QUALITY (75), THREADS (0|1)
+
+shopt -s dotglob	# .files matching in globs
+shopt -s globstar   # ** in globs
+shopt -s nocaseglob # case-insensitive globs
+declare -A COUNT	# associative array
+
+OPACITIES=( 11565:0.2%   11822:0.7% 12079:1.1%   12336:1.6% 12593:2.1%   12850:2.6% \
+            13107:3%     13364:3.5% 13621:4%     13878:4.5% 14135:4.9%   14392:5.4% \
+            14649:5.9%   14906:6.4% 15163:6.9%   15420:7.3% 15677:7.8%   15934:8.3% \
+            16191:8.8%   16448:9.2% 16705:9.7%   16962:~10% 17219:~10.5% 17476:~11% \
+            17733:~11.5% 17990:~12% 18247:~12.5% 18504:~13% 18761:~13.5% 19018:~14% \
+            19275:~14.5% 19532:~15% 20046:~15.5% 20303:~16% 20560:~16.5% 20817:~17% \
+            21074:~17.5% 21331:~18% 21588:~18.5% 21845:~19% 22102:~19.5% 22359:~20% \
+            25186:~25%   27756:~30% 30069:~35%   33153:~40% 35209:~45%   38550:~50% \
+            40606:~55%   43947:~60% 46003:~65%   49344:~70% 51143:~75%   54741:~80% \
+            56540:~85%   59110:~90% 59624:~91%   60138:~92% 60909:~93%   61423:~94% \
+            61937:~95%   62451:~96% 62965:~97%   64507:~98% 65021:~99%   65535:100% )
+
+function show-opacity {
+	local i X OP="$1"
+	(( OP > 65535 )) && OP=65535
+	for i in "${OPACITIES[@]}"; do
+		X=( ${i/:/ } )
+		(( X[0] >= $OP )) && echo "$OP (< ${X[1]})" && return
+	done
+}
+
+function set-term-title { echo -en "\033]2;$1\007"; }
+# ignore-case search
+function locate { find -maxdepth "$(awk -F/ '{print NF}' <<< "${1#./}")" -iwholename "$1" -print -quit; }
+
+function ffmpeg-version {
+	if [[ "$("$FFMPEG" -version 2>/dev/null)" =~ ^ffmpeg\ version\ ([0-9]+(\.[0-9]+)) ]]; then
+		echo "${BASH_REMATCH[1]}"
+	else
+		"$FFMPEG" -help long 2>/dev/null | grep --quiet '^-fps_mode ' && echo 6 || echo 4
+	fi
+}
+
+function parse-args {
+	NAME=`basename "$0"`
+	if (( $# > 0 )); then
+		while getopts "m:d:q:w:o:t:l:peav1" OPTION; do
+			case "$OPTION" in
+			    m) MODE=$OPTARG ;;
+			    d) GAMEDIR=$OPTARG ;;
+			    q) QUALITY=$OPTARG ;;
+			    w) WMETHOD=$OPTARG ;;
+			    o) OPACITY=$OPTARG ;;
+			    t) THREADS=$OPTARG ;;
+			    l) LOGLEVEL=${OPTARG:--} ;;
+			    p) PRETEND=true ;;
+			    e) ERRORSONLY=true ;;
+			    a) ACCEL=true ;;
+			    v) VPARALLEL=true ;;
+			    1) PARALLEL_=- ;;
+			    ?)
+				cat <<-END
+				Usage: $0 [ -m MODE ] [ -d GAMEDIR ] [ -q QUALITY ] [ -w METHOD ] [ -o OPACITY] [ -t THREADS ] [ -l LOGLEVEL ] [ -p ] [ -1 ] [ MODE ]
+				    MODE	   RenPy | RPGM | Ace | Other (default is based on script name or detected)
+				    GAMEDIR	Folder to be scanned for updates (default is based on MODE: ./game | ./www | .)
+				    QUALITY	WebP/JPEG quality (default 80)
+				    WMETHOD	WebP compression method (0-6, default 5; 6 is best quality, 0 is fastest)
+				    OPACITY	PNG transparency threshold (for JPEG conversion; default 20480=16.5%, maximum 65535)
+				    THREADS	ffmpeg threads (default 0 = 'optimal', or 1 with VPARALLEL)
+				    LOGLEVEL   ffmpeg loglevel settings (default '-hide_banner -loglevel warning -stats')
+				    PRETEND	is set to 'true' by -p; this enables pretend mode, skipping actual file conversion
+				    ERRORSONLY is set to 'true' by -e; this enables quiet mode, only printing out errors
+				    ACCEL	  is set to 'true' by -a; this enables ffmpeg acceleration for VP9 which may affect compression/quality
+				    VPARALLEL  is set to 'true' by -v; this enforces optional parallel processing for videos, if available
+				    PARALLEL   is set to '-' by -1; this disables optional parallel processing if available
+				
+				    All these and FFMPEG/MAGICK/PARALLEL_/RPATOOL/MVDECRYPTOR/RGSSDECRYPTOR (paths to executables)
+				    can also passed as variables.
+				END
+				exit 1
+				;;
+			esac
+		done
+		(( $# - OPTIND >= 0 )) && MODE=${@:$OPTIND:1}
+	fi
+	if [ -z "$MODE" ]; then
+		if [[ "$NAME" = RenCruncher* ]]; then
+			MODE=RenPy
+		elif [[ "$NAME" = RPGMCruncher* ]]; then
+			MODE=RPGM
+		elif [[ "$NAME" = AceCruncher* ]]; then
+			MODE=Ace
+		elif [[ "$NAME" = OtherCruncher* ]]; then
+			MODE=Other
+		elif [ -d ./game ] || [ -f "$(locate './*.py')" ] || [ -f "$(locate './*.rpyc')" ] || [ -f "$(locate './*.rpyb')" ]; then
+			MODE=RenPy
+		elif [ -f "$(locate './www/data/System.json')" ]; then
+			MODE=RPGM
+		elif [ -f "$(locate './Game.ini')" ] && [ -f "$(locate './System/RGSS*.dll')" ]; then
+			MODE=Ace
+		else
+			MODE=Other
+		fi
+	fi
+	GAME="$([ "$GAMEDIR" ] && realpath "$GAMEDIR" || basename "$PWD")"
+	GAME="${GAME%_compressed}"
+	_PARALLEL="$(which parallel 2>/dev/null)"
+	[ "$PARALLEL_" ] && [ ! "$PARALLEL_" = - ] && _PARALLEL="$PARALLEL_"
+	: "${PARALLEL_:=$_PARALLEL}"
+	: "${RPATOOL:=`which rpatool 2>/dev/null || which rpatool.py 2>/dev/null`}"
+	: "${MVDECRYPTOR:=`which mvdecryptor 2>/dev/null`}"
+	: "${RGSSDECRYPTOR:=`which rgssdecryptor 2>/dev/null`}"
+	[ "$ERRORSONLY" = true ] || ERRORSONLY=false
+	$ERRORSONLY && local _LOGLEVEL='fatal -nostats' || local _LOGLEVEL='warning -stats'
+	[ "$LOGLEVEL" = - ] && LOGLEVEL="" || : "${LOGLEVEL:=-hide_banner -loglevel $_LOGLEVEL}"
+}
+
+function assert-executable {
+	if [ ! -x "$1" ] || [ -d "$1" ]; then
+		echo "    ! Error: Cannot locate $2 executable, unable to continue."
+		echo "             Please install ${3:-$2} package, or specify path to $2 executable via ${2^^} variable."
+		echo
+		read -p "             Press Enter to exit..."
+		exit 1
+	fi
+}
+
+function splash {
+	cat <<-END
+	
+	--------------------------------------------------------------
+	    $NAME - ${MODE_} Media Compactor v0.4.4
+	--------------------------------------------------------------
+	
+	END
+}
+
+function warning {
+	cat <<-END
+	
+	--------------------------------------------------------------
+	    *** THIS TOOL OVERWRITES FILES IN THE ${MODE_^^} GAME ***
+	    *** IT DOES NOT CREATE OR KEEP BACKUPS ***
+	    *** CLOSE NOW IF YOU DO NOT WANT THIS ***
+	--------------------------------------------------------------
+	
+	END
+}
+
+function init {
+	MODE_=$MODE
+	case "$MODE" in
+	    RenPy)
+		: "${GAMEDIR:=./game}"
+		NAME=RenCruncher
+		MODE_="Ren'Py"
+		;;
+	    RPGM)
+		: "${GAMEDIR:=`locate './www'`}"
+		NAME=RPGMCruncher
+		;;
+	    Ace)
+		: "${GAMEDIR:=.}"
+		NAME=AceCruncher
+		MODE_="RPGM VX Ace"
+		;;
+	    *)
+		: "${GAMEDIR:=.}"
+		NAME=OtherCruncher
+		;;
+	esac
+	: "${FFMPEG:=`which ffmpeg`}"
+	(( `echo "$(ffmpeg-version) < 5.1" | bc --mathlib` > 0 )) && FPSMODE='-vsync' || FPSMODE='-fps_mode'
+	: "${CONVERT:=`which magick`}"
+	: "${QUALITY:=80}"
+	: "${WMETHOD:=5}"
+	: "${OPACITY:=20480}"
+	[ "$PRETEND" = true ] || PRETEND=false
+	[ "$ACCEL" = true ] || ACCEL=false
+	[ "$VPARALLEL" = true ] || VPARALLEL=false
+	$ERRORSONLY && VERBOSE='-quiet' || VERBOSE='-verbose'
+	COUNT=( )
+	clear
+	set-term-title "$NAME {$GAME}"
+	splash
+	$PRETEND && echo -e "  Pretend mode: only counting files\n"
+	if [ ! -d "$GAMEDIR" ]; then
+		cat <<-END
+		   ! Error: Cannot locate ${MODE_} game folder, unable to continue.
+		            Please run this script in the same folder as game executable.
+		END
+		read -p "            Press Enter to exit..."
+		exit 1
+	fi
+	assert-executable "$FFMPEG"  ffmpeg
+	assert-executable "$CONVERT" magick convert "imagemagick"
+	[[ ! -x "$RPATOOL" || -d "$RPATOOL" ]] && RPATOOL=""
+	[[ ! -x "$MVDECRYPTOR" || -d "$MVDECRYPTOR" ]] && MVDECRYPTOR=""
+	[[ ! -x "$RGSSDECRYPTOR" || -d "$RGSSDECRYPTOR" ]] && RGSSDECRYPTOR=""
+	[[ "$PARALLEL_" = '-' || ! -x "$PARALLEL_" || -d "$PARALLEL_" ]] && PARALLEL_=""
+	[ "$PARALLEL_" ] || VPARALLEL=false
+	: "${THREADS:=`$VPARALLEL && echo 1 || echo 0`}"
+	($VPARALLEL || $ACCEL) && VLOGLEVEL="$LOGLEVEL" || VLOGLEVEL="${LOGLEVEL/-nostats/-stats}"
+}
+
+function menu {
+	warning
+	cat <<-END
+	  Please select files to process:
+	    1) Image Files
+	    2) Audio Files
+	    3) Video Files
+	
+	    5) All of the above
+	
+	END
+	[ "$MODE" = RenPy ] && [ "$RPATOOL" ] && cat <<-END
+	    x) Extract *.rpa archives
+	    c) Repack *.rpa/ to archives
+	
+	END
+	[ "$MODE" = RPGM ] && [ "$MVDECRYPTOR" ] && cat <<-END
+	    d) Decrypt MV resource files
+	    D) Decrypt MV resource files (autodetect key)
+	
+	END
+	[ "$MODE" = Ace ] && [ "$RGSSDECRYPTOR" ] && cat <<-END
+	    r) Extract Game.rgss3a archive (irreversible)
+	
+	END
+	cat <<-END
+	    i) Check runtime parameters information
+	
+	    Press q/Q to Exit
+	
+	END
+	
+	read -p "  Enter a number/letter: "
+	echo -e "\n--------------------------------------------------------------\n"
+	export TOTAL_TIME=0
+	case "$REPLY" in
+	    1)
+		images
+		report image
+		;;
+	    2)
+		audio
+		report audio
+		;;
+	    3)
+		video
+		report video
+		;;
+	    5)
+		images
+		audio
+		video
+		report image audio video
+		;;
+	    x) [ "$MODE" = RenPy ] && [ "$RPATOOL" ] && rpa unpack ;;
+	    c) [ "$MODE" = RenPy ] && [ "$RPATOOL" ] && rpa repack ;;
+	    d) [ "$MODE" = RPGM ] && [ "$MVDECRYPTOR" ] && "$MVDECRYPTOR" ;;
+	    D) [ "$MODE" = RPGM ] && [ "$MVDECRYPTOR" ] && DETECT=yes "$MVDECRYPTOR" ;;
+	    r) [ "$MODE" = Ace ] && [ "$RGSSDECRYPTOR" ] && rgss-unpack ;;
+	    i) params-info ;;
+	    q) return 1 ;;
+		Q) return 1 ;;
+	esac
+	return $?
+}
+
+function params-info {
+    clear
+    echo -e "\n--------------------------------------------------------------\n"
+	[ "$PARALLEL_" ] && local PARALLEL="$PARALLEL_" || local PARALLEL="- ($_PARALLEL)"
+	cat <<-END
+	  GAMEDIR    = $(realpath "$GAMEDIR")
+	  MODE       = $MODE
+	  QUALITY    = $QUALITY
+	  WMETHOD    = $WMETHOD
+	  OPACITY    = $(show-opacity $OPACITY)
+	  THREADS    = $THREADS
+	  LOGLEVEL   = $LOGLEVEL
+	  ERRORSONLY = $ERRORSONLY
+	  ACCEL      = $ACCEL
+	  VPARALLEL  = $VPARALLEL
+	
+	--------------------------------------------------------------
+	
+	  PARALLEL_     = $PARALLEL
+	  FFMPEG        = $FFMPEG (v$(ffmpeg-version))
+	  CONVERT       = $CONVERT
+	  RPATOOL       = $RPATOOL
+	  MVDECRYPTOR   = $MVDECRYPTOR
+	  RGSSDECRYPTOR = $RGSSDECRYPTOR
+	
+	--------------------------------------------------------------
+	END
+	echo -e "\n"
+	read -p "Press Enter to continue..."
+}
+
+function rpa {
+	pushd "$GAMEDIR" >/dev/null
+	local FILES=( **/*.rpa )
+	local COUNTER=0
+	for FILE in "${FILES[@]}"; do
+		[ -e "$FILE" ] || continue
+		[[ "$1" = unpack && ! -d "$FILE" ]] || [[ "$1" = repack && -d "$FILE" ]] || continue
+		echo "$FILE" && let COUNTER++
+		if [ "$1" = unpack ]; then
+			"$RPATOOL" -xo "$FILE~/" "$FILE" || exit 1
+		else
+			pushd "$FILE" >/dev/null
+			"$RPATOOL" -c "../$(basename "$FILE")~" * || exit 1
+			popd >/dev/null
+		fi
+		rm -r "$FILE"
+		mv "$FILE"{~,}
+	done
+	popd >/dev/null
+	local MSG="${1^}ed $COUNTER archives. Press Enter to continue..."
+	read -p "$MSG"
+}
+
+function rgss-unpack {
+	local FILE="$(locate ./Game.rgss3a)";  FILE="${FILE#./}"
+	if [ ! -f "$FILE" ]; then
+		local MSG="Failed to locate Game.rgss3a archive. Press Enter to continue..."
+	else
+		"$RGSSDECRYPTOR" --proj "$FILE" && rm --verbose --interactive=never "$FILE" \
+		    && local MSG="Completed unpacking '$FILE'. Press Enter to continue..." \
+		    || local MSG="Failed to unpack or remove '$FILE'. Press Enter to continue..."
+	fi
+	read -p "$MSG"
+}
+
+function filesize        { stat -c%s -- "$1"; }
+function hex-bytes       { for i in "$@"; do printf '\\x%02x' $((0xFF & i)); done; }
+function little-endian   { echo -ne `hex-bytes $1 $(($1>>8)) $(($1>>16)) $(($1>>24))`; }
+function webp-header-fix { little-endian $((`filesize "$1"` - 8)) | dd of="$1" obs=1 seek=4 conv=notrunc status=none; }
+export -f filesize hex-bytes little-endian webp-header-fix
+
+function convert-image    { "$CONVERT" $VERBOSE "$1" -quality "$QUALITY" -define webp:method="$WMETHOD" WEBP:"$2"; }
+function convert-parallax { "$CONVERT" $VERBOSE "$1" -define webp:lossless=true WEBP:"$2"; }
+function convert-jpgpng   {
+    # check for transparent pixels
+	if (( $("$CONVERT" "$1" -alpha extract -format '%[min]' info:) < "$OPACITY" )); then
+	    # for PNG: -quality {compression-level}{filter-type}
+		"$CONVERT" -regard-warnings $VERBOSE "$1" -quality 95 PNG:"$2"
+	else
+		"$CONVERT" -regard-warnings $VERBOSE "$1" -quality "$QUALITY" JPEG:"$2"
+	fi
+}
+export -f convert-parallax convert-image convert-jpgpng
+
+function convert-audio { "$FFMPEG" -y -i "$1" -map_metadata -1 -codec:a libopus -vn -b:a 32k -compression_level 10 -vbr on -f ogg "$2" $LOGLEVEL; }
+function convert-mp3   { "$FFMPEG" -y -i "$1" -map_metadata -1 -codec:a libmp3lame -qscale:a 7 -vn -f mp3 "$2" $LOGLEVEL; }
+function convert-ogg   { "$FFMPEG" -y -i "$1" -codec:a libvorbis -qscale:a 3 -f ogg "$2" $LOGLEVEL; }
+export -f convert-audio convert-mp3 convert-ogg
+
+function convert-webm {
+	local PASSLOG="$(mktemp -t "cruncher:${1//\//\\}.XXX-0.log")";  PASSLOG="${PASSLOG%-0.log}"
+	if $ACCEL; then
+		"$FFMPEG" -y -i "$1" -vaapi_device /dev/dri/renderD128 -vf 'format=nv12,hwupload' -c:v vp9_vaapi -threads "$THREADS" -pass 1 -b:v 0 \
+		    -global_quality:v 150 -g 240 $FPSMODE vfr -an \
+		    -passlogfile "$PASSLOG" -f webm /dev/null $VLOGLEVEL && \
+		"$FFMPEG" -y -i "$1" -vaapi_device /dev/dri/renderD128 -vf 'format=nv12,hwupload' -c:v vp9_vaapi -threads "$THREADS" -pass 2 -b:v 0 \
+		    -global_quality:v 150 -g 240 $FPSMODE vfr -c:a libopus -vbr on -compression_level:a 10 -frame_duration 60 -application audio -b:a 32k \
+		    -passlogfile "$PASSLOG" -f webm "$2" $VLOGLEVEL
+	else
+		"$FFMPEG" -y -i "$1" -c:v libvpx-vp9 -threads "$THREADS" -row-mt 1 -quality good -pass 1 -b:v 0 -crf 40 -speed 4 \
+		    -tile-columns 4 -frame-parallel 1 \
+		    -g 240 $FPSMODE vfr -an \
+		    -passlogfile "$PASSLOG" -f webm /dev/null $VLOGLEVEL && \
+		"$FFMPEG" -y -i "$1" -c:v libvpx-vp9 -threads "$THREADS" -row-mt 1 -quality good -pass 2 -b:v 0 -crf 40 -speed 1 \
+		    -tile-columns 4 -frame-parallel 1 -auto-alt-ref 1 -lag-in-frames 25 \
+		    -g 240 $FPSMODE vfr -c:a libopus -vbr on -compression_level 10 -frame_duration 60 -application audio -b:a 32k \
+		    -passlogfile "$PASSLOG" -f webm "$2" $VLOGLEVEL
+	fi
+	local STATUS=$?
+	rm -f "$PASSLOG-0.log"
+	return $STATUS
+}
+
+function convert-ogv {
+	local PASSLOG="$(mktemp -t "cruncher:${1//\//\\}.XXX-0.log")";  PASSLOG="${PASSLOG%-0.log}"
+	"$FFMPEG" -y -i "$1" -c:v libtheora -threads "$THREADS" -pass 1 -g 240 -vsync 2 -an \
+	    -passlogfile "$PASSLOG" -f ogv /dev/null $VLOGLEVEL && \
+	"$FFMPEG" -y -i "$1" -c:v libtheora -threads "$THREADS" -pass 2 -g 240 -vsync 2 -c:a libvorbis -compression_level 10 \
+	    -passlogfile "$PASSLOG" -f ogv "$2" $VLOGLEVEL
+	local STATUS=$?
+	rm -f "$PASSLOG-0.log"
+	return $STATUS
+}
+export -f convert-webm convert-ogv
+
+function images {
+	if [ "$MODE" = Ace ]; then
+		for EXT in jpg jpeg png; do process image $EXT jpgpng; done
+	else
+		for EXT in webp jpg jpeg bmp png gif; do process image $EXT; done
+	fi
+}
+
+function audio  {
+	if [[ "$MODE" = @(RPGM|Ace) ]]; then
+		process audio mp3 mp3
+		process audio wav mp3
+		process audio ogg ogg
+	else
+		for EXT in mp3 wav ogg opus; do process audio $EXT; done
+	fi
+}
+
+function video  {
+	[ "$MODE" = Ace ] && FMT=ogv || FMT=webm
+	for EXT in webm mp4 mkv m4v mpg mov ogv avi; do process video $EXT $FMT; done
+}
+
+function show-time {
+	local N="$(printf '%.0f' "$1")"
+	echo "$((( N < 60 )) && echo $N || printf '%dm%02d' `expr $N / 60` `expr $N % 60`)s"
+}
+
+function show-progress {
+	local PERCENT=$(echo "scale=2;$1 / $2 * 100" | bc -l)
+	set-term-title "$NAME: converting ${3^^} | $1/$2 files (${PERCENT%.*}%) ${*:4} {$GAME}"
+	printf "%s|\e[48;5;15;30m%0${#2}d/%d %${PERCENT%.*}s\e[31m${PERCENT%.*}%%\e[0m| %s\n\n" "$3" "$1" "$2" "" "${*:4}" >&2
+}
+
+function apply-conversion {
+	local TYPE=$1
+	local EXT=$2
+	local FILE=$3
+	[[ ( "$TYPE" = video && ! $VPARALLEL && ! $ACCEL) || "$VERBOSE" = '-verbose' ]] && local _VERBOSE='--verbose' || local _VERBOSE=''
+	[ "$_VERBOSE" ] && echo -e "Now processing $GAMEDIR/$FILE...\n" >&2
+	chmod +w "$FILE"
+	if [ "$MODE" = RenPy ] && [ "$EXT" = webp ]; then
+		webp-header-fix "$FILE"
+		[ "$_VERBOSE" ] && echo -e "webp header rewritten, continuing...\n" >&2
+	fi
+	local BUFFER="$(mktemp -t "cruncher:${FILE//\//\\}".XXX)"
+	chmod --reference="$FILE" "$BUFFER"
+	if [ "$MODE" = RPGM ] && [[ "${FILE,,}" = img/parallaxes/* ]]; then
+		convert-parallax "$FILE" "$BUFFER"
+	else
+		convert-"$4" "$FILE" "$BUFFER"
+	fi
+	if [ ! "$?" = 0 ]; then
+		echo "ERROR - Conversion failed or stopped..." >&2
+	elif [ ! -s "$BUFFER" ]; then
+		echo "ERROR - New filesize is 0 bytes - reverting..." >&2
+	elif (( `filesize "$BUFFER"` >= `filesize "$FILE"` )); then
+		[ "$_VERBOSE" ] && echo "SKIPPING - New filesize is larger than the old one..." >&2
+	else
+		mv $_VERBOSE "$BUFFER" "$FILE" >&2
+	fi
+	rm -f "$BUFFER"
+	if [ "$DONE" ]; then
+		echo -n . >> "$DONE"
+		local COUNTER=$(filesize "$DONE")
+		local PERCENT=$(echo "scale=2;$COUNTER / $TOTAL * 100" | bc -l)
+		set-term-title "$NAME: converting ${EXT^^} | $COUNTER/$TOTAL files (${PERCENT%.*}%) {$GAME}"
+		echo -e "# converting ${EXT^^}: $COUNTER/$TOTAL files\n$PERCENT"
+	fi
+	[ "$_VERBOSE" ] && echo "Processing of $FILE completed." >&2
+}
+export -f apply-conversion set-term-title
+
+function process {
+	local TYPE=$1
+	local EXT=$2
+	$PRETEND || $ERRORSONLY || echo -e "\n Looking for $EXT $TYPE files to process..." >&2
+	local TOTAL=`find "$GAMEDIR" -iname "*.$EXT" | wc -l`
+	! $PRETEND && echo -e "# converting ${EXT^^}: 0/$TOTAL files\n0"
+	if (( TOTAL <= 0 )); then
+		$PRETEND || $ERRORSONLY || echo -e "\nNo $EXT $TYPE files found.\n" >&2
+	else
+		cd "$GAMEDIR"
+		local FILES=( **/*."$EXT" )
+		if ! $PRETEND; then
+			local START=`date +%s.%N`
+			set-term-title "$NAME: converting ${EXT^^} | $TOTAL $TYPE files {$GAME}"
+			if [ "$PARALLEL_" ] && ([ "$TYPE" != video ] || $VPARALLEL || ($ACCEL && [ "${3:-$TYPE}" = webm ])); then
+				export GAMEDIR MODE CONVERT FFMPEG FPSMODE QUALITY WMETHOD OPACITY THREADS LOGLEVEL VLOGLEVEL ACCEL VERBOSE VPARALLEL
+				export GAME NAME TOTAL START DONE="$(mktemp -t cruncher-$EXT.XXX)" AV_LOG_FORCE_COLOR=yes
+				printf '%s\n' "${FILES[@]}" | "$PARALLEL_" --bar apply-conversion "$TYPE" "$EXT" {} "${3:-$TYPE}"
+				rm "$DONE"; unset DONE
+			else
+				local COUNTER=0
+				show-progress $COUNTER $TOTAL $EXT
+				for FILE in "${FILES[@]}"; do
+					let COUNTER++
+					apply-conversion "$TYPE" "$EXT" "$FILE" "${3:-$TYPE}"
+					local ETA=`echo $(date +%s.%N) $START $TOTAL $COUNTER | awk '{printf("%.0f", ($1 - $2) * ($3 - $4) / $4)}'`
+					show-progress $COUNTER $TOTAL $EXT "ETA=$(show-time $ETA)"
+				done
+			fi
+			local DURATION=`echo $(date +%s.%N) $START | awk '{printf("%.1f", $1 - $2)}'`
+			TOTAL_TIME=`echo $TOTAL_TIME $DURATION | awk '{print $1 + $2}'`
+		fi
+		cd - >/dev/null
+		COUNT[$EXT]="${#FILES[@]}"
+		$PRETEND || echo -e "Done - processed ${#FILES[@]} $EXT $TYPE files (in $DURATION seconds).\n" >&2
+	fi
+}
+
+function count { echo "${COUNT[$1]:-0} $1"; }
+function report {
+	$PRETEND || set-term-title "$NAME: Finished {$GAME}"
+	$PRETEND || cat <<-END
+	--------------------------------------------------------------
+	Summary:
+	END
+	$PRETEND && ACTION=Found || ACTION=Processed
+	[[ " $@ " =~ " image " ]] && echo "$ACTION $(count webp), $(count jpg), $(count jpeg), $(count bmp), $(count png), $(count gif)"
+	[[ " $@ " =~ " audio " ]] && echo "$ACTION $(count mp3), $(count ogg), $(count opus), $(count wav)"
+	[[ " $@ " =~ " video " ]] && echo "$ACTION $(count webm), $(count mp4), $(count mkv), $(count m4v), $(count mpg), $(count mov), $(count ogv), $(count avi)"
+	if $PRETEND; then
+		return 1
+	else
+		cat <<-END
+		--------------------------------------------------------------
+		
+		  Finished in $(show-time $TOTAL_TIME)
+		
+		  Enter "1" to go back to the menu, or any other
+		END
+		read -p "  key to exit: "
+		echo -e "\n--------------------------------------------------------------\n"
+		[[ "$REPLY" = 1 ]];  return $?
+	fi
+}
+
+function grep+ { [ "$2" ] && [ ! "$2" = / ] && grep --colour -oEH "$1" "${@:3}" "$2"; }
+
+function extra-info {
+	if [ "$MODE" = RPGM ]; then
+		echo -e "\n  Encryption key in game config/scripts [must match or not be hardcoded]:"
+		grep+ '"encryptionKey":\s*"[^"]*"' "$(locate "$GAMEDIR/data/System.json")"
+		grep+ '[_[:alnum:]]+\._encryptionKey\s*=[^;]*;?' "$(locate "$GAMEDIR/js")/" -R
+	fi
+}
+
+# won't be executed when sourcing this file
+if [[ "${BASH_SOURCE[0]}" = "$0" ]]; then
+	parse-args "$@"
+	while :; do
+		init
+		PRETEND=true images
+		PRETEND=true audio
+		PRETEND=true video
+		PRETEND=true report image audio video
+		extra-info
+		! $PRETEND && menu || break
+	done
+fi
+$PRETEND || set-term-title "${PWD##*/}"
