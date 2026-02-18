@@ -16,3 +16,6 @@
 [submodule "tools/soldata-decryptor"]
 	path = tools/soldata-decryptor
 	url = git@github.com:ddCeka/soldata-decryptor.git
+[submodule "tools/unrpa"]
+	path = tools/unrpa
+	url = git@github.com:ddCeka/unrpa.git
