@@ -1,0 +1,18 @@
+[submodule "tools/asar"]
+	path = tools/asar
+	url = https://github.com/ddCeka/Asar
+[submodule "tools/decrypter-rpgmvmz"]
+	path = tools/decrypter-rpgmvmz
+	url = https://github.com/ddCeka/Decrypter-Rpgmvmz
+[submodule "tools/rgssd"]
+	path = tools/rgssd
+	url = git@github.com:ddCeka/Rgssd.git
+[submodule "tools/rgss-decryptor"]
+	path = tools/rgss-decryptor
+	url = git@github.com:ddCeka/RGSS-Decryptor.git
+[submodule "tools/rpatool"]
+	path = tools/rpatool
+	url = git@github.com:ddCeka/rpatool.git
+[submodule "tools/soldata-decryptor"]
+	path = tools/soldata-decryptor
+	url = git@github.com:ddCeka/soldata-decryptor.git
