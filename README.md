@@ -38,9 +38,6 @@ python
 ```
 which
 ```
-```
-rust (for alternative tools)
-```
 
 ## Features
 
@@ -183,7 +180,7 @@ decrypt with autodetected key).
 
 ## How to unpack RPG Maker VX Ace game resources archive
 
-Usage: run in the game folder `RgssDecryptor -p Game.rgss3a` (via terminal).  
+Usage: run in the game folder `RgssDecryptor -p Game.rgss3a <destination>` (via terminal).
 Note that `-p` is important – without the placeholder file it creates, the game can't find unpacked resources.
 
 ### Setup using Mono (see attached file)
@@ -274,8 +271,8 @@ or
 [RgssDecryptor]: tools/RgssDecrypter.exe
 [RgssDecryptor build]: tools/RgssDecrypter.md
 [RgssDecryptor windows]: https://github.com/usagirei/RGSS-Decryptor/releases
-[Alternative tool Rpgm MV MZ]: https://github.com/ddCeka/Decrypter-Rpgmvmz
-[Alternative tool Rpgm VX Ace]: https://github.com/ddCeka/Rgssd
+[Alternative tool Rpgm MV MZ]: tools/decrypter-Rpgmvmz
+[Alternative tool Rpgm VX Ace]: tools/rgssd
 [q4wine]: https://q4wine.brezblock.org.ua/screenshots
 [winetricks]: https://github.com/Winetricks/winetricks#installing
 [NodeJS]: https://nodejs.org/
@@ -283,4 +280,4 @@ or
 [decryptor comment]: https://f95zone.to/threads/school-of-lust.6555/post-5448092
 [asar]: https://www.npmjs.com/package/@electron/asar
 [Electron]: https://github.com/electron/electron/releases
-[Asar alternative]: https://github.com/ddCeka/Asar
+[Asar alternative]: tools/asar
