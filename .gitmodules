@@ -1,9 +1,6 @@
 [submodule "tools/asar"]
 	path = tools/asar
 	url = https://github.com/ddCeka/Asar
-[submodule "tools/decrypter-rpgmvmz"]
-	path = tools/decrypter-rpgmvmz
-	url = https://github.com/ddCeka/Decrypter-Rpgmvmz
 [submodule "tools/rgssd"]
 	path = tools/rgssd
 	url = git@github.com:ddCeka/Rgssd.git
