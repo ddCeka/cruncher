@@ -13,3 +13,6 @@
 [submodule "tools/soldata-decryptor"]
 	path = tools/soldata-decryptor
 	url = git@github.com:ddCeka/soldata-decryptor.git
+[submodule "tools/decvz"]
+	path = tools/decvz
+	url = https://github.com/ddCeka/decvz.git
