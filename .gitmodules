@@ -12,7 +12,10 @@
 	url = git@github.com:ddCeka/soldata-decryptor.git
 [submodule "tools/decvz"]
 	path = tools/decvz
-	url = https://github.com/ddCeka/decvz.git
+	url = git@github.com:ddCeka/decvz.git
 [submodule "tools/asar"]
 	path = tools/asar
 	url = git@github.com:ddCeka/asar.git
+[submodule "tools/rpa"]
+	path = tools/rpa
+	url = git@github.com:ddCeka/rpa.git
