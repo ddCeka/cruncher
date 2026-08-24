@@ -16,3 +16,6 @@
 [submodule "tools/rpa"]
 	path = tools/rpa
 	url = git@github.com:ddCeka/rpa.git
+[submodule "tools/rgss-dec"]
+	path = tools/rgss-dec
+	url = git@github.com:ddCeka/rgss-dec.git
