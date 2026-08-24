@@ -1,6 +1,3 @@
-[submodule "tools/rgssd"]
-	path = tools/rgssd
-	url = git@github.com:ddCeka/Rgssd.git
 [submodule "tools/rgss-decryptor"]
 	path = tools/rgss-decryptor
 	url = git@github.com:ddCeka/RGSS-Decryptor.git
