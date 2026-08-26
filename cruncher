@@ -197,7 +197,7 @@ function init {
     [[ ! -x "$RGSSDECRYPTOR" || -d "$RGSSDECRYPTOR" ]] && RGSSDECRYPTOR=""
     [[ "$PARALLEL_" = '-' || ! -x "$PARALLEL_" || -d "$PARALLEL_" ]] && PARALLEL_=""
     [ "$PARALLEL_" ] || VPARALLEL=false
-    : "${THREADS:=$(VPARALLEL && echo 1 || echo 0)}"
+    : "${THREADS:=$(VPARALLEL &> /dev/null && echo 1 || echo 0)}"
     ($VPARALLEL || $ACCEL) && VLOGLEVEL="$LOGLEVEL" || VLOGLEVEL="${LOGLEVEL/-nostats/-stats}"
 }
 
