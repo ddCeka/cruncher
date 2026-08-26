@@ -1,5 +1,5 @@
 #!/bin/bash
-# accepted vars: MODE (RenPy|RPGM|HTML), GAMEDIR (./game|./www|.), FFMPEG (`which ffmpeg`), CONVERT (`which convert`), QUALITY (75), THREADS (0|1)
+# accepted vars: MODE (RenPy|RPGM|HTML), GAMEDIR (./game|./www|.), FFMPEG (`ffmpeg`), CONVERT (`convert`), QUALITY (75), THREADS (0|1)
 
 shopt -s dotglob	# .files matching in globs
 shopt -s globstar   # ** in globs
@@ -102,12 +102,12 @@ function parse-args {
     fi
     GAME="$([ "$GAMEDIR" ] && realpath "$GAMEDIR" || basename "$PWD")"
     GAME="${GAME%_compressed}"
-    _PARALLEL="$(which parallel 2>/dev/null)"
+    _PARALLEL="$(command -v parallel 2>/dev/null)"
     [ "$PARALLEL_" ] && [ ! "$PARALLEL_" = - ] && _PARALLEL="$PARALLEL_"
     : "${PARALLEL_:=$_PARALLEL}"
-    : "${RPATOOL:=$(which rpatool 2>/dev/null || which rpatool.py 2>/dev/null)}"
-    : "${MVDECRYPTOR:=$(which mvdecryptor 2>/dev/null)}"
-    : "${RGSSDECRYPTOR:=$(which rgssdecryptor 2>/dev/null)}"
+    : "${RPATOOL:=$(command -v rpatool 2>/dev/null || command -v rpatool.py 2>/dev/null)}"
+    : "${MVDECRYPTOR:=$(command -v mvdecryptor 2>/dev/null)}"
+    : "${RGSSDECRYPTOR:=$(command -v rgssdecryptor 2>/dev/null)}"
     [ "$ERRORSONLY" = true ] || ERRORSONLY=false
     $ERRORSONLY && local _LOGLEVEL='fatal -nostats' || local _LOGLEVEL='warning -stats'
     [ "$LOGLEVEL" = - ] && LOGLEVEL="" || : "${LOGLEVEL:=-hide_banner -loglevel $_LOGLEVEL}"
@@ -167,9 +167,9 @@ function init {
         NAME=OtherCruncher
         ;;
 	esac
-    : "${FFMPEG:=$(which ffmpeg)}"
+    : "${FFMPEG:=$(command -v ffmpeg)}"
     (( $(echo "$(ffmpeg-version) < 5.1" | bc --mathlib) > 0 )) && FPSMODE='-vsync' || FPSMODE='-fps_mode'
-    : "${CONVERT:=$(which convert)}"
+    : "${CONVERT:=$(command -v convert)}"
     : "${QUALITY:=80}"
     : "${WMETHOD:=5}"
     : "${OPACITY:=16962}"
@@ -197,7 +197,7 @@ function init {
     [[ ! -x "$RGSSDECRYPTOR" || -d "$RGSSDECRYPTOR" ]] && RGSSDECRYPTOR=""
     [[ "$PARALLEL_" = '-' || ! -x "$PARALLEL_" || -d "$PARALLEL_" ]] && PARALLEL_=""
     [ "$PARALLEL_" ] || VPARALLEL=false
-    : "${THREADS:=$(VPARALLEL &> /dev/null && echo 1 || echo 0)}"
+    : "${THREADS:=$(VPARALLEL 2>/dev/null && echo 1 || echo 0)}"
     ($VPARALLEL || $ACCEL) && VLOGLEVEL="$LOGLEVEL" || VLOGLEVEL="${LOGLEVEL/-nostats/-stats}"
 }
 
