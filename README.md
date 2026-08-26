@@ -35,9 +35,6 @@ nodejs / nodejs-lts
 ```
 python
 ```
-```
-which
-```
 
 ## Features
 
@@ -65,7 +62,8 @@ The parameters are based on Windows script version (except that ffmpeg thread co
    replaces original archive, taking the same name including extension).
  * If [`MvDecryptor`][MvDecryptor] is detected, it can be used for batch decoding of RPGM (MV/MZ) resource files. (For
    MZ, additional adjustment is needed – [see below](#how-to-compress-rpg-maker-mz-games).)
- * See Also [Alternative tool Rpgm MV MZ][Alternative tool Rpgm MV MZ] and [Alternative tool Rpgm VX Ace][Alternative tool Rpgm VX Ace].
+ * See Also [Alternative tool Rpgm MV MZ][Alternative tool Rpgm MV MZ], [Alternative tool Rpgm VX Ace][Alternative tool Rpgm VX Ace]
+   and [Alternative tool RenPy][Alternative tool RenPy]
  
 > [!Note]
 > apparently some devs hardcode encryption key into the game, making it ignore the one in config; so I added 
@@ -267,12 +265,12 @@ or
 [MvDecryptor]: tools/MvDecryptor
 [RgssDecryptor script]: #setup-using-mono-see-attached-file
 [WebP method]: https://manpages.debian.org/testing/webp/cwebp.1.en.html#m
-[parallel-bug]: https://savannah.gnu.org/bugs/?62234
 [RgssDecryptor]: tools/RgssDecrypter.exe
 [RgssDecryptor build]: tools/RgssDecrypter.md
 [RgssDecryptor windows]: https://github.com/usagirei/RGSS-Decryptor/releases
-[Alternative tool Rpgm MV MZ]: tools/decrypter-Rpgmvmz
-[Alternative tool Rpgm VX Ace]: tools/rgssd
+[Alternative tool Rpgm MV MZ]: tools/decvz
+[Alternative tool Rpgm VX Ace]: tools/rgss-dec
+[Alternative tool RenPy]: tools/rpa
 [q4wine]: https://q4wine.brezblock.org.ua/screenshots
 [winetricks]: https://github.com/Winetricks/winetricks#installing
 [NodeJS]: https://nodejs.org/
