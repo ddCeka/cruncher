@@ -1,12 +1,12 @@
 #!/bin/bash
-# accepted vars: MODE (RenPy|RPGM|HTML), GAMEDIR (./game|./www|.), FFMPEG (`ffmpeg`), CONVERT (`convert`), QUALITY (75), THREADS (0|1)
+# accepted vars: MODE (RenPy|RPGM|HTML), GAMEDIR (./game|./www|.), FFMPEG (`ffmpeg`), CONVERT (`convert`), QUALITY (80), THREADS (0|1)
 
 shopt -s dotglob	# .files matching in globs
 shopt -s globstar   # ** in globs
 shopt -s nocaseglob # case-insensitive globs
 declare -A COUNT	# associative array
 
-VERSION="v0.4.4"
+VERSION="v0.4.5"
 
 OPACITIES=( 11565:0.2%   11822:0.7% 12079:1.1%   12336:1.6% 12593:2.1%   12850:2.6% \
             13107:3%     13364:3.5% 13621:4%     13878:4.5% 14135:4.9%   14392:5.4% \
