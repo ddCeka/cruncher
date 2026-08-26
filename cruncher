@@ -6,6 +6,8 @@ shopt -s globstar   # ** in globs
 shopt -s nocaseglob # case-insensitive globs
 declare -A COUNT	# associative array
 
+VERSION="v0.4.4"
+
 OPACITIES=( 11565:0.2%   11822:0.7% 12079:1.1%   12336:1.6% 12593:2.1%   12850:2.6% \
             13107:3%     13364:3.5% 13621:4%     13878:4.5% 14135:4.9%   14392:5.4% \
             14649:5.9%   14906:6.4% 15163:6.9%   15420:7.3% 15677:7.8%   15934:8.3% \
@@ -58,22 +60,50 @@ function parse-args {
 			    1) PARALLEL_=- ;;
 			    ?)
 				cat <<-END
-				Usage: $0 [ -m MODE ] [ -d GAMEDIR ] [ -q QUALITY ] [ -w METHOD ] [ -o OPACITY] [ -t THREADS ] [ -l LOGLEVEL ] [ -p ] [ -1 ] [ MODE ]
-				    MODE	   RenPy | RPGM | Ace | Other (default is based on script name or detected)
-				    GAMEDIR	Folder to be scanned for updates (default is based on MODE: ./game | ./www | .)
-				    QUALITY	WebP/JPEG quality (default 80)
-				    WMETHOD	WebP compression method (0-6, default 5; 6 is best quality, 0 is fastest)
-				    OPACITY	PNG transparency threshold (for JPEG conversion; default 20480=16.5%, maximum 65535)
-				    THREADS	ffmpeg threads (default 0 = 'optimal', or 1 with VPARALLEL)
-				    LOGLEVEL   ffmpeg loglevel settings (default '-hide_banner -loglevel warning -stats')
-				    PRETEND	is set to 'true' by -p; this enables pretend mode, skipping actual file conversion
-				    ERRORSONLY is set to 'true' by -e; this enables quiet mode, only printing out errors
-				    ACCEL	  is set to 'true' by -a; this enables ffmpeg acceleration for VP9 which may affect compression/quality
-				    VPARALLEL  is set to 'true' by -v; this enforces optional parallel processing for videos, if available
-				    PARALLEL   is set to '-' by -1; this disables optional parallel processing if available
-				
-				    All these and FFMPEG/CONVERT/PARALLEL_/RPATOOL/MVDECRYPTOR/RGSSDECRYPTOR (paths to executables)
-				    can also passed as variables.
+Usage: 
+
+cruncher [ -m MODE ] [ -d GAMEDIR ] [ -q QUALITY ] [ -w METHOD ]
+         [ -o OPACITY] [ -t THREADS ] [ -l LOGLEVEL ]
+         [ -p ] [ -1 ] [ MODE ]
+
+MODE        RenPy | RPGM | Ace | Other
+            (default is based on script name or detected)
+
+GAMEDIR     Folder to be scanned for updates
+            (default is based on MODE: ./game | ./www | .)
+
+QUALITY     WebP/JPEG quality
+            (default 80)
+
+WMETHOD     WebP compression method
+            (0-6, default 5, 6 is best quality, 0 is fastest)
+
+OPACITY     PNG transparency threshold for JPEG conversion
+            (default 20480=16.5%, maximum 65535)
+
+THREADS     ffmpeg threads
+            (default 0 = 'optimal', or 1 with VPARALLEL)
+
+LOGLEVEL    ffmpeg loglevel settings
+            (default '-hide_banner -loglevel warning -stats')
+
+PRETEND     is set to 'true' by -p
+            dry run, skipping actual file conversion
+
+ERRORSONLY  is set to 'true' by -e
+            only printing out errors
+
+ACCEL       is set to 'true' by -a
+            enables ffmpeg acceleration for VP9
+            may affect compression/quality
+
+VPARALLEL   is set to 'true' by -v
+            enforces optional parallel processing for videos
+
+PARALLEL    is set to '-' by -1
+            disables optional parallel processing
+
+All these and FFMPEG/CONVERT/PARALLEL_/RPATOOL/MVDECRYPTOR/RGSSDECRYPTOR (paths to executables) can also passed as variables.
 				END
 				exit 1
 				;;
@@ -127,7 +157,7 @@ function splash {
 	cat <<-END
 	
 	--------------------------------------------------------------
-	    $NAME - ${MODE_} Media Compactor v0.4.4
+	    $NAME - ${MODE_} Media Compactor ${VERSION}
 	--------------------------------------------------------------
 	
 	END
@@ -137,9 +167,9 @@ function warning {
 	cat <<-END
 	
 	--------------------------------------------------------------
-	    *** THIS TOOL OVERWRITES FILES IN THE ${MODE_^^} GAME ***
-	    *** IT DOES NOT CREATE OR KEEP BACKUPS ***
-	    *** CLOSE NOW IF YOU DO NOT WANT THIS ***
+	*** THIS TOOL OVERWRITES FILES IN THE ${MODE_^^} GAME
+	*** IT DOES NOT CREATE OR KEEP BACKUPS
+	*** CLOSE NOW IF YOU DO NOT WANT THIS
 	--------------------------------------------------------------
 	
 	END
@@ -172,7 +202,7 @@ function init {
     : "${CONVERT:=$(command -v convert)}"
     : "${QUALITY:=80}"
     : "${WMETHOD:=5}"
-    : "${OPACITY:=16962}"
+    : "${OPACITY:=20480}"
     [ "$PRETEND" = true ] || PRETEND=false
     [ "$ACCEL" = true ] || ACCEL=false
     [ "$VPARALLEL" = true ] || VPARALLEL=false
@@ -204,12 +234,12 @@ function init {
 function menu {
     warning
     cat <<-END
-        Please select files to process:
-        1) Image Files
-        2) Audio Files
-        3) Video Files
+Please select files to process:
+    1) Image Files
+    2) Audio Files
+    3) Video Files
 
-        5) All of the above
+    5) All of the above
 
 	END
 	[ "$MODE" = RenPy ] && [ "$RPATOOL" ] && cat <<-END
@@ -229,11 +259,11 @@ function menu {
 	cat <<-END
 	    i) Check runtime parameters information
 	
-	    Press q/Q to Exit
+	Press q/Q to Exit
 	
 	END
 	
-	read -p "  Enter a number/letter: "
+	read -p "Enter a number/letter: "
 	echo -e "\n--------------------------------------------------------------\n"
 	export TOTAL_TIME=0
 	case "$REPLY" in
@@ -263,6 +293,7 @@ function menu {
 	    i) params-info ;;
 	    q) return 1 ;;
 		Q) return 1 ;;
+		exit) return 1 ;;
 	esac
 	return $?
 }
@@ -272,25 +303,25 @@ function params-info {
     echo -e "\n--------------------------------------------------------------\n"
 	[ "$PARALLEL_" ] && local PARALLEL="$PARALLEL_" || local PARALLEL="- ($_PARALLEL)"
 	cat <<-END
-	  GAMEDIR    = $(realpath "$GAMEDIR")
-	  MODE       = $MODE
-	  QUALITY    = $QUALITY
-	  WMETHOD    = $WMETHOD
-	  OPACITY    = $(show-opacity $OPACITY)
-	  THREADS    = $THREADS
-	  LOGLEVEL   = $LOGLEVEL
-	  ERRORSONLY = $ERRORSONLY
-	  ACCEL      = $ACCEL
-	  VPARALLEL  = $VPARALLEL
+	GAMEDIR    = $(realpath "$GAMEDIR")
+	MODE       = $MODE
+	QUALITY    = $QUALITY
+	WMETHOD    = $WMETHOD
+	OPACITY    = $(show-opacity $OPACITY)
+	THREADS    = $THREADS
+	LOGLEVEL   = $LOGLEVEL
+	ERRORSONLY = $ERRORSONLY
+	ACCEL      = $ACCEL
+	VPARALLEL  = $VPARALLEL
 	
 	--------------------------------------------------------------
 	
-	  PARALLEL_     = $PARALLEL
-	  FFMPEG        = $FFMPEG (v$(ffmpeg-version))
-	  CONVERT       = $CONVERT
-	  RPATOOL       = $RPATOOL
-	  MVDECRYPTOR   = $MVDECRYPTOR
-	  RGSSDECRYPTOR = $RGSSDECRYPTOR
+	PARALLEL_     = $PARALLEL
+	FFMPEG        = $FFMPEG v$(ffmpeg-version)
+	CONVERT       = $CONVERT
+	RPATOOL       = $RPATOOL
+	MVDECRYPTOR   = $MVDECRYPTOR
+	RGSSDECRYPTOR = $RGSSDECRYPTOR
 	
 	--------------------------------------------------------------
 	END
@@ -401,7 +432,7 @@ function images {
 	fi
 }
 
-function audio  {
+function audio {
 	if [[ "$MODE" = @(RPGM|Ace) ]]; then
 		process audio mp3 mp3
 		process audio wav mp3
@@ -411,7 +442,7 @@ function audio  {
 	fi
 }
 
-function video  {
+function video {
 	[ "$MODE" = Ace ] && FMT=ogv || FMT=webm
 	for EXT in webm mp4 mkv m4v mpg mov ogv avi; do process video $EXT $FMT; done
 }
