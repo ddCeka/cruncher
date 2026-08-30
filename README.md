@@ -261,21 +261,21 @@ or
 [Cruncher]: https://f95zone.to/threads/cruncher.10227/
 [webp-header-fix]: tools/webp-header-fix.py
 [parallel]: https://www.gnu.org/software/parallel/
-[rpatool]: tools/rpatool
-[MvDecryptor]: tools/MvDecryptor
+[rpatool]: https://github.com/ddCeka/rpatool
+[MvDecryptor]: mvdecryptor
 [RgssDecryptor script]: #setup-using-mono-see-attached-file
 [WebP method]: https://manpages.debian.org/testing/webp/cwebp.1.en.html#m
 [RgssDecryptor]: tools/RgssDecrypter.exe
 [RgssDecryptor build]: tools/RgssDecrypter.md
 [RgssDecryptor windows]: https://github.com/usagirei/RGSS-Decryptor/releases
-[Alternative tool Rpgm MV MZ]: tools/decvz
-[Alternative tool Rpgm VX Ace]: tools/rgss-dec
-[Alternative tool RenPy]: tools/rpa
+[Alternative tool Rpgm MV MZ]: https://github.com/ddCeka/decvz
+[Alternative tool Rpgm VX Ace]: https://github.com/ddCeka/rgss-dec
+[Alternative tool RenPy]: https://github.com/ddCeka/rpa
 [q4wine]: https://q4wine.brezblock.org.ua/screenshots
 [winetricks]: https://github.com/Winetricks/winetricks#installing
 [NodeJS]: https://nodejs.org/
-[decryptor]: tools/soldata-decryptor
+[decryptor]: https://github.com/ddCeka/soldata-decryptor
 [decryptor comment]: https://f95zone.to/threads/school-of-lust.6555/post-5448092
 [asar]: https://www.npmjs.com/package/@electron/asar
 [Electron]: https://github.com/electron/electron/releases
-[Asar alternative]: tools/asar
+[Asar alternative]: https://github.com/ddCeka/asar
