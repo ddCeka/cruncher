@@ -196,7 +196,7 @@ Note that `-p` is important – without the placeholder file it creates, the gam
     ```
 
 > [!Note]
-> the script is now included in directory.
+> the script is now included in tools directory.
 
 [How the executable was made][RgssDecryptor build]
 
@@ -262,8 +262,8 @@ or
 [webp-header-fix]: tools/webp-header-fix.py
 [parallel]: https://www.gnu.org/software/parallel/
 [rpatool]: https://github.com/ddCeka/rpatool
-[MvDecryptor]: mvdecryptor
-[RgssDecryptor script]: #setup-using-mono-see-attached-file
+[MvDecryptor]: tools/mvdecryptor
+[RgssDecryptor script]: tools/rgssdecryptor
 [WebP method]: https://manpages.debian.org/testing/webp/cwebp.1.en.html#m
 [RgssDecryptor]: tools/RgssDecrypter.exe
 [RgssDecryptor build]: tools/RgssDecrypter.md
