@@ -1,0 +1,77 @@
+#!/bin/env python3
+#
+# RPG Maker MV Decryption Script
+# Created By SilicaAndPina 1/12/2018
+# (+patched for CLI use, py3 compatibility and key autodetection)
+#
+
+import binascii # Imports the "binascii" library
+import os # Imports the "OS" library
+import sys
+
+EXTENSIONS = {b'.rpgmvo': b'.ogg',  b'.ogg_': b'.ogg',  b'.rpgmvm': b'.m4a',  b'.m4a_': b'.m4a',  b'.rpgmvp': b'.png',  b'.png_': b'.png'}
+RPGMV_PREFIX = b"5250474D560000000003010000000000"
+PNG_HEADER = b"89504E470D0A1A0A0000000D49484452"
+
+
+def xor(data, key): # XOR Encryption / Decryption Algorithm
+    l = len(key) # Sets l to length of key.
+    return bytearray(((data[i] ^ key[i % l]) for i in range(0, len(data))))  # Do complex MATH stuff and convert the result to a bytearray.
+
+def findKey(gameDir): # Function for finding decryption key
+    key = open(gameDir + b"/www/data/System.json", 'rb').read() # Read System.json
+    key = key[key.index(b'"encryptionKey":"') + len('"encryptionKey":"'):] # Find "encryptionKey":" in System.json
+    key = key[:key.index(b'"}')] # Finish string at "}
+    return bytearray(binascii.unhexlify(key)) # Decode Hexadecimal and convert to ByteArray.
+
+def decryptFilename(encryptedFilename): # Function for "Decrypting" a filename
+    k = next(k for k in EXTENSIONS if encryptedFilename.endswith(k))
+    return k and encryptedFilename[:-len(k)] + EXTENSIONS[k]
+
+def isEncryptedFile(path): # Function for determining if the specified path is an Encrypted RMMV File..
+    return any(path.endswith(k) for k in EXTENSIONS)
+
+def decryptFile(encryptedFilename, key): # Function for decrypting a file.
+    file = open(encryptedFilename, 'rb').read() # Read encrypted file.
+    file = file[16:] # Remove file header.
+    cyphertext = bytearray(file[:16]) # Read encrypted file header.
+    plaintext = bytes(xor(cyphertext, key)) # Decrypt file header
+    file = file[16:] # Remove decrypted file header
+    open(decryptFilename(encryptedFilename), 'wb').write(plaintext + file) # Write decrypted file header + rest of file to disk as Decrypted Filename..
+
+def detectKeyFromPng(encryptedFilename):
+    file = open(encryptedFilename, 'rb').read() # Read encrypted file.
+    if file[:16] == binascii.unhexlify(RPGMV_PREFIX): # Ensure file header.
+        file = file[16:] # Remove file header.
+        cyphertext = bytearray(file[:16]) # Read encrypted file header.
+        return bytes( xor(cyphertext, binascii.unhexlify(PNG_HEADER)) )
+
+def detectKey(gameDir):
+    for path, dirs, files in os.walk(gameDir + b"/www"):
+        for f in files:
+            ext = next((EXTENSIONS[k] for k in EXTENSIONS if f.endswith(k)), None)
+            if ext == b".png":
+                return detectKeyFromPng( os.path.join(path, f) )
+
+def decryptEntireGame(gameDir, key = None): # Function for decrypting an entire game folder.
+    key = key or findKey(gameDir) # Find Decryption Key
+    for path, dirs, files in os.walk(gameDir + b"/www"): # List all files inside the Game's project folder.
+        for f in files: # For all files in Game's WWW folder.
+            if isEncryptedFile(os.path.join(path, f)): # If its an encrypted RM MV File...
+                if os.environ.get('VERBOSE', "").lower() == 'yes':
+                    print(os.path.join(path, f).decode('utf-8'))
+                decryptFile(os.path.join(path, f),key) # Decrypt the file.
+                os.remove(os.path.join(path, f)) # Delete encrypted file
+    SystemJson = open(gameDir + b"/www/data/System.json", 'rb').read() # Reads System.json
+    SystemJson = SystemJson.replace(b'"hasEncryptedImages":true', b'"hasEncryptedImages":false') # Sets hasEncryptedImages to FALSE
+    SystemJson = SystemJson.replace(b'"hasEncryptedAudio":true', b'"hasEncryptedAudio":false') # Sets hasEncryptedAudio to FALSE
+    open(gameDir + b"/www/data/System.json", 'wb').write(SystemJson) # Writes new System.json to disk
+    open(gameDir + b"/www/Game.rpgproject", 'wb').write(b"RPGMV 1.0.0") # Creates Editable RPG Maker MV Project File
+
+if __name__ == '__main__':
+    key = None
+    if os.environ.get('DETECT', "").lower() == 'yes':
+        key = detectKey(b'.')
+        key and print( binascii.hexlify(key) )
+    decryptEntireGame(b'.', key)
+    print("...MV decryption complete")
