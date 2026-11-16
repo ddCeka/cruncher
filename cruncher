@@ -9,6 +9,7 @@ shopt -s nullglob   # unmatched globs expand to empty list
 declare -A COUNT    # associative array
 
 VERSION="v0.4.5"
+HR="------------------------------------------------------------"
 
 TMP_ROOT=$(mktemp -d -t cruncher-work.XXXXXX)
 trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
@@ -66,7 +67,7 @@ function ffmpeg-version {
 function validate-uint {
     local val="$1" name="$2"
     if [[ ! "$val" =~ ^[0-9]+$ ]]; then
-        echo "    ! Error: Invalid numeric value '$val' for $name." >&2
+        echo "! Error: Invalid value '$val' for $name." >&2
         exit 1
     fi
 }
@@ -91,50 +92,24 @@ function parse-args {
                 ?)
                     cat <<END
 Usage:
+cruncher [-m MODE] [-d DIR] [-q QUAL] [-w METH] [-o OPAC]
+         [-t THRD] [-l LOG] [-p] [-e] [-a] [-v] [-1] [MODE]
 
-cruncher [ -m MODE ] [ -d GAMEDIR ] [ -q QUALITY ] [ -w METHOD ]
-         [ -o OPACITY] [ -t THREADS ] [ -l LOGLEVEL ]
-         [ -p ] [ -e ] [ -a ] [ -v ] [ -1 ] [ MODE ]
+MODE       RenPy | RPGM | Ace | Other (auto-detected)
+GAMEDIR    Target folder (default: ./game | ./www | .)
+QUALITY    WebP/JPEG quality (default: 80)
+WMETHOD    WebP compression method 0-6 (default: 5)
+OPACITY    PNG transparency threshold (default: 20480=16.5%)
+THREADS    ffmpeg threads (default: 0, or 1 w/ -v)
+LOGLEVEL   ffmpeg flags (default: warning -stats)
+-p         PRETEND: dry run, count files only
+-e         ERRORSONLY: print errors only
+-a         ACCEL: enable VA-API VP9 acceleration
+-v         VPARALLEL: parallel video encoding
+-1         PARALLEL_: disable parallel processing
 
-MODE        RenPy | RPGM | Ace | Other
-            (default is based on script name or detected)
-
-GAMEDIR     Folder to be scanned for updates
-            (default is based on MODE: ./game | ./www | .)
-
-QUALITY     WebP/JPEG quality
-            (default 80)
-
-WMETHOD     WebP compression method
-            (0-6, default 5, 6 is best quality, 0 is fastest)
-
-OPACITY     PNG transparency threshold for JPEG conversion
-            (default 20480=16.5%, maximum 65535)
-
-THREADS     ffmpeg threads
-            (default 0 = 'optimal', or 1 with VPARALLEL)
-
-LOGLEVEL    ffmpeg loglevel settings
-            (default '-hide_banner -loglevel warning -stats')
-
-PRETEND     is set to 'true' by -p
-            dry run, skipping actual file conversion
-
-ERRORSONLY  is set to 'true' by -e
-            only printing out errors
-
-ACCEL       is set to 'true' by -a
-            enables ffmpeg acceleration for VP9
-            may affect compression/quality
-
-VPARALLEL   is set to 'true' by -v
-            enforces optional parallel processing for videos
-
-PARALLEL    is set to '-' by -1
-            disables optional parallel processing
-
-All these and FFMPEG/CONVERT/VAAPI_DEVICE/PARALLEL_/RPATOOL/MVDECRYPTOR/RGSSDECRYPTOR
-can also be passed as environment variables.
+Env vars also supported: FFMPEG, CONVERT, VAAPI_DEVICE,
+PARALLEL_, RPATOOL, MVDECRYPTOR, RGSSDECRYPTOR.
 END
                     exit 1
                     ;;
@@ -185,33 +160,29 @@ END
 
 function assert-executable {
     if [ ! -x "$1" ] || [ -d "$1" ]; then
-        echo "    ! Error: Cannot locate $2 executable, unable to continue."
-        echo "             Please install ${3:-$2} package, or specify path to $2 executable via ${2^^} variable."
-        echo
-        read -r -p "             Press Enter to exit..."
+        cat <<END
+! Error: Cannot locate $2 executable.
+  Install ${3:-$2} or set ${2^^} to its path.
+END
+        read -r -p "Press Enter to exit..."
         exit 1
     fi
 }
 
 function splash {
     cat <<END
-
---------------------------------------------------------------
-    $NAME - ${MODE_} Media Compactor ${VERSION}
---------------------------------------------------------------
-
+$HR
+  $NAME - ${MODE_} Media Compactor ${VERSION}
+$HR
 END
 }
 
 function warning {
     cat <<END
-
---------------------------------------------------------------
-*** THIS TOOL OVERWRITES FILES IN THE ${MODE_^^} GAME
-*** IT DOES NOT CREATE OR KEEP BACKUPS
-*** CLOSE NOW IF YOU DO NOT WANT THIS
---------------------------------------------------------------
-
+$HR
+*** WARNING: OVERWRITES FILES IN ${MODE_^^} GAME
+*** NO BACKUPS CREATED - CLOSE NOW TO CANCEL
+$HR
 END
 }
 
@@ -271,14 +242,14 @@ function init {
     clear
     set-term-title "$NAME {$GAME}"
     splash
-    $PRETEND && echo -e "  Pretend mode: only counting files\n"
+    $PRETEND && echo "  [Pretend mode: scanning files only]"
 
     if [ ! -d "$GAMEDIR" ]; then
         cat <<END
-   ! Error: Cannot locate ${MODE_} game folder, unable to continue.
-            Please run this script in the same folder as game executable.
+! Error: Cannot locate ${MODE_} game folder.
+  Run this script in the game executable folder.
 END
-        read -r -p "            Press Enter to exit..."
+        read -r -p "Press Enter to exit..."
         exit 1
     fi
 
@@ -309,45 +280,35 @@ END
 }
 
 function menu {
+    echo
     warning
     cat <<END
-Please select files to process:
-    1) Image Files
-    2) Audio Files
-    3) Video Files
-
-    5) All of the above
-
+Select action:
+  1) Image Files          2) Audio Files
+  3) Video Files          5) All Media
 END
     if [ "$MODE" = RenPy ] && [ -n "$RPATOOL" ]; then
         cat <<END
-    x) Extract *.rpa archives
-    c) Repack *.rpa/ to archives
-
+  x) Extract *.rpa        c) Repack *.rpa/
 END
     fi
     if [ "$MODE" = RPGM ] && [ -n "$MVDECRYPTOR" ]; then
         cat <<END
-    d) Decrypt MV resource files
-    D) Decrypt MV resource files (autodetect key)
-
+  d) Decrypt MV files     D) Decrypt MV (auto-key)
 END
     fi
     if [ "$MODE" = Ace ] && [ -n "$RGSSDECRYPTOR" ]; then
         cat <<END
-    r) Extract Game.rgss3a archive (irreversible)
-
+  r) Extract Game.rgss3a (irreversible)
 END
     fi
     cat <<END
-    i) Check runtime parameters information
-
-Press q/Q to Exit
-
+  i) Runtime parameters   q) Exit
+$HR
 END
 
-    read -r -p "Enter a number/letter: "
-    echo -e "\n--------------------------------------------------------------\n"
+    read -r -p "Choice: "
+    echo "$HR"
     export TOTAL_TIME=0
     case "$REPLY" in
         1)
@@ -381,34 +342,29 @@ END
 
 function params-info {
     clear
-    echo -e "\n--------------------------------------------------------------\n"
     local PARALLEL
     [ -n "$PARALLEL_" ] && PARALLEL="$PARALLEL_" || PARALLEL="- ($_PARALLEL)"
     cat <<END
-GAMEDIR      = $(realpath "$GAMEDIR")
-MODE         = $MODE
-QUALITY      = $QUALITY
-WMETHOD      = $WMETHOD
-OPACITY      = $(show-opacity "$OPACITY")
-THREADS      = $THREADS
-LOGLEVEL     = $LOGLEVEL
-ERRORSONLY   = $ERRORSONLY
-ACCEL        = $ACCEL
-VAAPI_DEVICE = $VAAPI_DEVICE
-VPARALLEL    = $VPARALLEL
-
---------------------------------------------------------------
-
-PARALLEL_     = $PARALLEL
-FFMPEG        = $FFMPEG v$(ffmpeg-version)
-CONVERT       = $CONVERT
-RPATOOL       = $RPATOOL
-MVDECRYPTOR   = $MVDECRYPTOR
-RGSSDECRYPTOR = $RGSSDECRYPTOR
-
---------------------------------------------------------------
+$HR
+  Runtime Parameters
+$HR
+GAMEDIR      : $(realpath "$GAMEDIR")
+MODE         : $MODE
+QUALITY      : $QUALITY (WMETHOD: $WMETHOD)
+OPACITY      : $(show-opacity "$OPACITY")
+THREADS      : $THREADS (VPARALLEL: $VPARALLEL)
+ACCEL        : $ACCEL ($VAAPI_DEVICE)
+ERRORSONLY   : $ERRORSONLY
+LOGLEVEL     : ${LOGLEVEL:-none}
+$HR
+PARALLEL_    : $PARALLEL
+FFMPEG       : $FFMPEG (v$(ffmpeg-version))
+CONVERT      : $CONVERT
+RPATOOL      : ${RPATOOL:-none}
+MVDECRYPTOR  : ${MVDECRYPTOR:-none}
+RGSSDECRYPTOR: ${RGSSDECRYPTOR:-none}
+$HR
 END
-    echo -e "\n"
     read -r -p "Press Enter to continue..."
 }
 
@@ -420,7 +376,7 @@ function rpa {
     for FILE in "${FILES[@]}"; do
         [ -e "$FILE" ] || continue
         [[ "$1" = unpack && ! -d "$FILE" ]] || [[ "$1" = repack && -d "$FILE" ]] || continue
-        echo "$FILE" && (( COUNTER++ ))
+        echo "  $FILE" && (( COUNTER++ ))
         if [ "$1" = unpack ]; then
             "$RPATOOL" -xo "$FILE~/" "$FILE" || { popd >/dev/null; exit 1; }
         else
@@ -432,8 +388,7 @@ function rpa {
         mv "$FILE"{~,}
     done
     popd >/dev/null || return
-    local MSG="${1^}ed $COUNTER archives. Press Enter to continue..."
-    read -r -p "$MSG"
+    read -r -p "${1^}ed $COUNTER archives. Press Enter..."
 }
 
 function rgss-unpack {
@@ -442,11 +397,11 @@ function rgss-unpack {
     FILE="${FILE#./}"
     local MSG
     if [ ! -f "$FILE" ]; then
-        MSG="Failed to locate Game.rgss3a archive. Press Enter to continue..."
+        MSG="Game.rgss3a not found. Press Enter..."
     else
         "$RGSSDECRYPTOR" --proj "$FILE" && rm --verbose --interactive=never "$FILE" \
-            && MSG="Completed unpacking '$FILE'. Press Enter to continue..." \
-            || MSG="Failed to unpack or remove '$FILE'. Press Enter to continue..."
+            && MSG="Unpacked '$FILE'. Press Enter..." \
+            || MSG="Failed unpacking '$FILE'. Press Enter..."
     fi
     read -r -p "$MSG"
 }
@@ -568,10 +523,17 @@ function show-time {
 
 function show-progress {
     local CURRENT="$1" TOTAL="$2" EXT="$3" EXTRA="${*:4}"
-    local PERCENT=0
+    local PERCENT=0 BAR_W=24 FILLED=0
     (( TOTAL > 0 )) && PERCENT=$(( CURRENT * 100 / TOTAL ))
-    set-term-title "$NAME: converting ${EXT^^} | $CURRENT/$TOTAL files (${PERCENT}%) $EXTRA {$GAME}"
-    printf "%s|\e[48;5;15;30m%0${#TOTAL}d/%d %${PERCENT}s\e[31m${PERCENT}%%\e[0m| %s\n\n" "$EXT" "$CURRENT" "$TOTAL" "" "$EXTRA" >&2
+    FILLED=$(( PERCENT * BAR_W / 100 ))
+    local BAR=""
+    (( FILLED > 0 )) && printf -v BAR "%${FILLED}s" "" && BAR="${BAR// /#}"
+    local PAD=""
+    (( BAR_W - FILLED > 0 )) && printf -v PAD "%$(( BAR_W - FILLED ))s" "" && PAD="${PAD// /.}"
+
+    set-term-title "$NAME: ${EXT^^} $CURRENT/$TOTAL (${PERCENT}%) $EXTRA {$GAME}"
+    printf "\r%-4s [%s%s] %3d%% (%d/%d) %-10s" "$EXT" "$BAR" "$PAD" "$PERCENT" "$CURRENT" "$TOTAL" "$EXTRA" >&2
+    (( CURRENT == TOTAL && TOTAL > 0 )) && echo >&2
 }
 
 function apply-conversion {
@@ -585,7 +547,7 @@ function apply-conversion {
         _VERBOSE='--verbose'
     fi
 
-    [ -n "$_VERBOSE" ] && echo -e "Now processing $GAMEDIR/$FILE...\n" >&2
+    [ -n "$_VERBOSE" ] && echo "Processing: $FILE" >&2
 
     # Save original permissions and ensure write access
     local ORIG_PERMS
@@ -594,7 +556,7 @@ function apply-conversion {
 
     if [ "$MODE" = RenPy ] && [ "$EXT" = webp ]; then
         webp-header-fix "$FILE"
-        [ -n "$_VERBOSE" ] && echo -e "webp header rewritten, continuing...\n" >&2
+        [ -n "$_VERBOSE" ] && echo "  WebP header rewritten." >&2
     fi
 
     local BUFFER
@@ -609,11 +571,11 @@ function apply-conversion {
 
     local CONV_STATUS=$?
     if (( CONV_STATUS != 0 )); then
-        echo "ERROR - Conversion failed or stopped for $FILE..." >&2
+        echo "! ERROR: Conversion failed for $FILE" >&2
     elif [ ! -s "$BUFFER" ]; then
-        echo "ERROR - New filesize is 0 bytes - reverting $FILE..." >&2
+        echo "! ERROR: 0-byte output, reverting $FILE" >&2
     elif (( $(filesize "$BUFFER") >= $(filesize "$FILE") )); then
-        [ -n "$_VERBOSE" ] && echo "SKIPPING - New filesize is larger than the old one for $FILE..." >&2
+        [ -n "$_VERBOSE" ] && echo "  SKIP: Larger than original ($FILE)" >&2
     else
         touch -r "$FILE" "$BUFFER"
         mv ${_VERBOSE:+"$_VERBOSE"} -- "$BUFFER" "$FILE" >&2
@@ -627,11 +589,9 @@ function apply-conversion {
         local COUNTER PERCENT=0
         COUNTER=$(filesize "$DONE")
         (( TOTAL > 0 )) && PERCENT=$(( COUNTER * 100 / TOTAL ))
-        set-term-title "$NAME: converting ${EXT^^} | $COUNTER/$TOTAL files (${PERCENT}%) {$GAME}"
-        echo -e "# converting ${EXT^^}: $COUNTER/$TOTAL files\n$PERCENT"
+        set-term-title "$NAME: ${EXT^^} $COUNTER/$TOTAL (${PERCENT}%) {$GAME}"
+        echo -e "# ${EXT^^}: $COUNTER/$TOTAL\n$PERCENT"
     fi
-
-    [ -n "$_VERBOSE" ] && echo "Processing of $FILE completed." >&2
 }
 export -f apply-conversion set-term-title
 
@@ -640,21 +600,20 @@ function process {
     local EXT="$2"
     local CONV_TYPE="${3:-$TYPE}"
 
-    $PRETEND || $ERRORSONLY || echo -e "\n Looking for $EXT $TYPE files to process..." >&2
-
     pushd "$GAMEDIR" >/dev/null || return
     local -a FILES=()
     mapfile -d '' FILES < <(find . -type f -iname "*.$EXT" -printf '%P\0')
     local TOTAL=${#FILES[@]}
 
-    ! $PRETEND && echo -e "# converting ${EXT^^}: 0/$TOTAL files\n0"
+    ! $PRETEND && echo -e "# ${EXT^^}: 0/$TOTAL\n0"
 
     if (( TOTAL <= 0 )); then
-        $PRETEND || $ERRORSONLY || echo -e "\nNo $EXT $TYPE files found.\n" >&2
+        $PRETEND || $ERRORSONLY || echo "  No .$EXT ($TYPE) files found." >&2
     else
         if ! $PRETEND; then
+            $ERRORSONLY || echo "  Found $TOTAL .$EXT ($TYPE) files..." >&2
             local START=$SECONDS
-            set-term-title "$NAME: converting ${EXT^^} | $TOTAL $TYPE files {$GAME}"
+            set-term-title "$NAME: ${EXT^^} | $TOTAL $TYPE files {$GAME}"
 
             if [ -n "$PARALLEL_" ] && { [ "$TYPE" != video ] || $VPARALLEL || { $ACCEL && [ "$CONV_TYPE" = webm ]; }; }; then
                 export GAMEDIR MODE CONVERT FFMPEG VAAPI_DEVICE FPSMODE QUALITY WMETHOD OPACITY THREADS LOGLEVEL VLOGLEVEL ACCEL VERBOSE VPARALLEL TMP_ROOT
@@ -674,47 +633,53 @@ function process {
                     ELAPSED=$(( SECONDS - START ))
                     ETA=0
                     (( COUNTER > 0 )) && ETA=$(( ELAPSED * (TOTAL - COUNTER) / COUNTER ))
-                    show-progress "$COUNTER" "$TOTAL" "$EXT" "ETA=$(show-time "$ETA")"
+                    show-progress "$COUNTER" "$TOTAL" "$EXT" "ETA $(show-time "$ETA")"
                 done
             fi
 
             local DURATION=$(( SECONDS - START ))
             TOTAL_TIME=$(( TOTAL_TIME + DURATION ))
+            echo "  Done: $TOTAL .$EXT files in $(show-time "$DURATION")." >&2
         fi
         COUNT[$EXT]="$TOTAL"
-        $PRETEND || echo -e "Done - processed $TOTAL $EXT $TYPE files (in $(show-time "$DURATION")).\n" >&2
     fi
 
     popd >/dev/null || return
 }
 
 function count {
-    echo "${COUNT[$1]:-0} $1"
+    printf "%-4s: %4d" "$1" "${COUNT[$1]:-0}"
 }
 
 function report {
     $PRETEND || set-term-title "$NAME: Finished {$GAME}"
-    $PRETEND || cat <<END
---------------------------------------------------------------
-Summary:
-END
-    local ACTION
-    $PRETEND && ACTION=Found || ACTION=Processed
-    [[ " $* " =~ " image " ]] && echo "$ACTION $(count webp), $(count jpg), $(count jpeg), $(count bmp), $(count png), $(count gif)"
-    [[ " $* " =~ " audio " ]] && echo "$ACTION $(count mp3), $(count ogg), $(count opus), $(count wav)"
-    [[ " $* " =~ " video " ]] && echo "$ACTION $(count webm), $(count mp4), $(count mkv), $(count m4v), $(count mpg), $(count mov), $(count ogv), $(count avi)"
+    echo
+    echo "$HR"
+    if $PRETEND; then
+        echo "  Scan Summary (Dry Run)"
+    else
+        echo "  Compression Summary (Time: $(show-time "$TOTAL_TIME"))"
+    fi
+    echo "$HR"
+
+    if [[ " $* " =~ " image " ]]; then
+        printf "  [Images] %s | %s | %s\n" "$(count webp)" "$(count jpg)" "$(count jpeg)"
+        printf "           %s | %s | %s\n" "$(count bmp)"  "$(count png)" "$(count gif)"
+    fi
+    if [[ " $* " =~ " audio " ]]; then
+        printf "  [Audio]  %s | %s | %s | %s\n" "$(count mp3)" "$(count ogg)" "$(count opus)" "$(count wav)"
+    fi
+    if [[ " $* " =~ " video " ]]; then
+        printf "  [Video]  %s | %s | %s | %s\n" "$(count webm)" "$(count mp4)" "$(count mkv)" "$(count m4v)"
+        printf "           %s | %s | %s | %s\n" "$(count mpg)"  "$(count mov)" "$(count ogv)" "$(count avi)"
+    fi
+    echo "$HR"
+
     if $PRETEND; then
         return 1
     else
-        cat <<END
---------------------------------------------------------------
-
-  Finished in $(show-time "$TOTAL_TIME")
-
-  Enter "1" to go back to the menu, or any other
-END
-        read -r -p "  key to exit: "
-        echo -e "\n--------------------------------------------------------------\n"
+        read -r -p "Enter '1' for menu, any other key to exit: "
+        echo "$HR"
         [[ "$REPLY" = 1 ]]
         return $?
     fi
@@ -726,7 +691,7 @@ function grep+ {
 
 function extra-info {
     if [ "$MODE" = RPGM ]; then
-        echo -e "\n  Encryption key in game config/scripts [must match or not be hardcoded]:"
+        echo "  RPGM Encryption Key:"
         grep+ '"encryptionKey":\s*"[^"]*"' "$(locate "$GAMEDIR/data/System.json")"
         grep+ '[_[:alnum:]]+\._encryptionKey\s*=[^;]*;?' "$(locate "$GAMEDIR/js")/" -R
     fi
