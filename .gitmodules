@@ -19,3 +19,6 @@
 [submodule "tools/rgss-dec"]
 	path = tools/rgss-dec
 	url = git@github.com:ddCeka/rgss-dec.git
+[submodule "tools/pckt"]
+	path = tools/pckt
+	url = git@github.com:ddCeka/pck-tool.git
