@@ -1,5 +1,5 @@
 #!/bin/bash
-# accepted vars: MODE (RenPy|RPGM|Ace|Other), GAMEDIR (./game|./www|.), FFMPEG, CONVERT, VAAPI_DEVICE, QUALITY (80), MAX_DIM (720), THREADS (0|1)
+# accepted vars: MODE (RenPy|RPGM|Ace|Godot|Other), GAMEDIR (./game|./www|.), FFMPEG, CONVERT, VAAPI_DEVICE, QUALITY (80), MAX_DIM (720), THREADS (0|1)
 
 shopt -s dotglob    # .files matching in globs
 shopt -s globstar   # ** in globs
@@ -29,6 +29,23 @@ OPACITIES=(
     61937:~95%   62451:~96%   62965:~97%   64507:~98%   65021:~99%   65535:100%
 )
 
+function fit60 {
+    local text="$1"
+    local max="${2:-60}"
+    if (( ${#text} <= max )); then
+        printf '%s' "$text"
+    elif (( max <= 3 )); then
+        printf '%.*s' "$max" "..."
+    else
+        printf '...%s' "${text: -$((max - 3))}"
+    fi
+}
+
+function log60 {
+    printf '%s\n' "$(fit60 "$1" 60)" >&2
+}
+export -f fit60 log60
+
 function show-opacity {
     local i threshold label OP="$1"
     (( OP > 65535 )) && OP=65535
@@ -54,6 +71,29 @@ function locate {
     find -maxdepth "$depth" -iwholename "$1" -print -quit
 }
 
+function has-embedded-pck {
+    local f="$1"
+    [ -f "$f" ] && [ ! -L "$f" ] || return 1
+    local sz
+    sz=$(stat -c%s -- "$f" 2>/dev/null) || return 1
+    (( sz >= 36 )) || return 1
+    local magic
+    magic=$(tail -c 4 -- "$f" 2>/dev/null | tr -d '\0')
+    [[ "$magic" == "GDPC" ]]
+}
+
+function locate-embedded-exe {
+    local f
+    for f in ./*; do
+        [ -f "$f" ] || continue
+        case "${f,,}" in
+            *.pck|*.sh|*.txt|*.md|*.json|*.ini|*.cfg|*.log|*.dll|*.so|*.dylib) continue ;;
+        esac
+        has-embedded-pck "$f" && { echo "${f#./}"; return 0; }
+    done
+    return 1
+}
+
 function ffmpeg-version {
     local ver_out
     ver_out=$("$FFMPEG" -version 2>/dev/null)
@@ -67,15 +107,57 @@ function ffmpeg-version {
 function validate-uint {
     local val="$1" name="$2"
     if [[ ! "$val" =~ ^[0-9]+$ ]]; then
-        echo "! Error: Invalid value '$val' for $name." >&2
+        log60 "! Error: Invalid value '$val' for $name."
         exit 1
     fi
 }
 
+function usage {
+    local code="${1:-0}"
+    cat <<END
+Usage: cruncher [options] [MODE]
+  cruncher [-m MODE] [-d DIR] [-q QUAL] [-w METH] [-o OPAC]
+           [-r MAX_DIM] [-t THRD] [-l LOG] [-p] [-e] [-a]
+           [-v] [-1] [-h] [MODE]
+
+Modes:
+  RenPy | RPGM | Ace | Godot | Other (auto-detected)
+
+Options:
+  -m MODE    Set engine mode explicitly
+  -d DIR     Target folder (default: ./game | ./www | .)
+  -q QUAL    WebP/JPEG quality (default: 80)
+  -w METH    WebP compression method 0-6 (default: 5)
+  -o OPAC    PNG alpha threshold (default: 20480=16.5%)
+  -r DIM     Max dimension cap in px, 0=off (default: 720)
+  -t THRD    ffmpeg threads (default: 0, or 1 w/ -v)
+  -l LOG     ffmpeg flags (default: warning -stats)
+  -p         Dry run: scan and count files only
+  -e         Print errors only
+  -a         Fast single-pass mobile VP9 encoding
+  -v         Parallel video encoding
+  -1         Disable GNU parallel processing
+  -h, --help Show this help message and exit
+
+Env vars:
+  FFMPEG, CONVERT, VAAPI_DEVICE, PARALLEL_, PCKT,
+  RPATOOL, MVDECRYPTOR, RGSSDECRYPTOR
+END
+    exit "$code"
+}
+
 function parse-args {
     NAME=$(basename "$0")
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --help) usage 0 ;;
+            --) break ;;
+        esac
+    done
+
     if (( $# > 0 )); then
-        while getopts "m:d:q:w:o:r:t:l:peav1" OPTION; do
+        while getopts "m:d:q:w:o:r:t:l:peav1h" OPTION; do
             case "$OPTION" in
                 m) MODE=$OPTARG ;;
                 d) GAMEDIR=$OPTARG ;;
@@ -90,31 +172,8 @@ function parse-args {
                 a) ACCEL=true ;;
                 v) VPARALLEL=true ;;
                 1) PARALLEL_=- ;;
-                ?)
-                    cat <<END
-Usage:
-cruncher [-m MODE] [-d DIR] [-q QUAL] [-w METH] [-o OPAC]
-         [-r MAX_DIM] [-t THRD] [-l LOG] [-p] [-e] [-a] [-v] [-1] [MODE]
-
-MODE       RenPy | RPGM | Ace | Other (auto-detected)
-GAMEDIR    Target folder (default: ./game | ./www | .)
-QUALITY    WebP/JPEG quality (default: 80)
-WMETHOD    WebP compression method 0-6 (default: 5)
-OPACITY    PNG transparency threshold (default: 20480=16.5%)
-MAX_DIM    Max dimension cap in px, 0=disable (default: 720)
-THREADS    ffmpeg threads (default: 0, or 1 w/ -v)
-LOGLEVEL   ffmpeg flags (default: warning -stats)
--p         PRETEND: dry run, count files only
--e         ERRORSONLY: print errors only
--a         ACCEL: fast single-pass mobile VP9 encoding
--v         VPARALLEL: parallel video encoding
--1         PARALLEL_: disable parallel processing
-
-Env vars also supported: FFMPEG, CONVERT, VAAPI_DEVICE,
-PARALLEL_, RPATOOL, MVDECRYPTOR, RGSSDECRYPTOR.
-END
-                    exit 1
-                    ;;
+                h) usage 0 ;;
+                ?) usage 1 ;;
             esac
         done
         (( $# - OPTIND >= 0 )) && MODE=${@:$OPTIND:1}
@@ -127,6 +186,8 @@ END
             MODE=RPGM
         elif [[ "$NAME" = AceCruncher* ]]; then
             MODE=Ace
+        elif [[ "$NAME" = GodotCruncher* ]]; then
+            MODE=Godot
         elif [[ "$NAME" = OtherCruncher* ]]; then
             MODE=Other
         elif [ -d ./game ] || [ -f "$(locate './*.py')" ] || [ -f "$(locate './*.rpyc')" ] || [ -f "$(locate './*.rpyb')" ]; then
@@ -135,6 +196,8 @@ END
             MODE=RPGM
         elif [ -f "$(locate './Game.ini')" ] && [ -f "$(locate './System/RGSS*.dll')" ]; then
             MODE=Ace
+        elif [ -f "$(locate './*.pck')" ] || [ -f "$(locate './project.godot')" ] || locate-embedded-exe >/dev/null; then
+            MODE=Godot
         else
             MODE=Other
         fi
@@ -146,6 +209,7 @@ END
     _PARALLEL="$(command -v parallel 2>/dev/null)"
     [ -n "$PARALLEL_" ] && [ "$PARALLEL_" != "-" ] && _PARALLEL="$PARALLEL_"
     : "${PARALLEL_:=$_PARALLEL}"
+    : "${PCKT:=$(command -v pckt 2>/dev/null || { [ -x ./pckt ] && realpath ./pckt; })}"
     : "${RPATOOL:=$(command -v rpatool 2>/dev/null || command -v rpatool.py 2>/dev/null)}"
     : "${MVDECRYPTOR:=$(command -v mvdecryptor 2>/dev/null)}"
     : "${RGSSDECRYPTOR:=$(command -v rgssdecryptor 2>/dev/null)}"
@@ -162,30 +226,26 @@ END
 
 function assert-executable {
     if [ ! -x "$1" ] || [ -d "$1" ]; then
-        cat <<END
-! Error: Cannot locate $2 executable.
-  Install ${3:-$2} or set ${2^^} to its path.
-END
+        echo "$HR"
+        log60 "! Error: Cannot locate $2 executable."
+        log60 "  Install ${3:-$2} or set ${2^^} to its path."
+        echo "$HR"
         read -r -p "Press Enter to exit..."
         exit 1
     fi
 }
 
 function splash {
-    cat <<END
-$HR
-  $NAME - ${MODE_} Media Compactor ${VERSION}
-$HR
-END
+    echo "$HR"
+    printf "  %s\n" "$(fit60 "$NAME - ${MODE_} Media Compactor ${VERSION}" 58)"
+    echo "$HR"
 }
 
 function warning {
-    cat <<END
-$HR
-*** WARNING: OVERWRITES FILES IN ${MODE_^^} GAME
-*** NO BACKUPS CREATED - CLOSE NOW TO CANCEL
-$HR
-END
+    echo "$HR"
+    printf "%s\n" "$(fit60 "*** WARNING: OVERWRITES FILES IN ${MODE_^^} GAME" 60)"
+    echo "*** NO BACKUPS CREATED - CLOSE NOW TO CANCEL"
+    echo "$HR"
 }
 
 function init {
@@ -205,6 +265,11 @@ function init {
             : "${GAMEDIR:=.}"
             NAME=AceCruncher
             MODE_="RPGM VX Ace"
+            ;;
+        Godot)
+            : "${GAMEDIR:=.}"
+            NAME=GodotCruncher
+            MODE_="Godot"
             ;;
         *)
             : "${GAMEDIR:=.}"
@@ -250,10 +315,10 @@ function init {
     $PRETEND && echo "  [Pretend mode: scanning files only]"
 
     if [ ! -d "$GAMEDIR" ]; then
-        cat <<END
-! Error: Cannot locate ${MODE_} game folder.
-  Run this script in the game executable folder.
-END
+        echo "$HR"
+        log60 "! Error: Cannot locate ${MODE_} game folder."
+        echo "  Run this script in the game executable folder."
+        echo "$HR"
         read -r -p "Press Enter to exit..."
         exit 1
     fi
@@ -271,6 +336,7 @@ END
         FPSMODE='-fps_mode'
     fi
 
+    [[ ! -x "$PCKT" || -d "$PCKT" ]] && PCKT=""
     [[ ! -x "$RPATOOL" || -d "$RPATOOL" ]] && RPATOOL=""
     [[ ! -x "$MVDECRYPTOR" || -d "$MVDECRYPTOR" ]] && MVDECRYPTOR=""
     [[ ! -x "$RGSSDECRYPTOR" || -d "$RGSSDECRYPTOR" ]] && RGSSDECRYPTOR=""
@@ -295,6 +361,11 @@ END
     if [ "$MODE" = RenPy ] && [ -n "$RPATOOL" ]; then
         cat <<END
   x) Extract *.rpa        c) Repack *.rpa/
+END
+    fi
+    if [ "$MODE" = Godot ] && [ -n "$PCKT" ]; then
+        cat <<END
+  x) Extract *.pck/exe    c) Repack *.pck/
 END
     fi
     if [ "$MODE" = RPGM ] && [ -n "$MVDECRYPTOR" ]; then
@@ -334,8 +405,14 @@ END
             video
             report image audio video
             ;;
-        x) [ "$MODE" = RenPy ] && [ -n "$RPATOOL" ] && rpa unpack ;;
-        c) [ "$MODE" = RenPy ] && [ -n "$RPATOOL" ] && rpa repack ;;
+        x)
+            [ "$MODE" = RenPy ] && [ -n "$RPATOOL" ] && rpa unpack
+            [ "$MODE" = Godot ] && [ -n "$PCKT" ] && godot-pck unpack
+            ;;
+        c)
+            [ "$MODE" = RenPy ] && [ -n "$RPATOOL" ] && rpa repack
+            [ "$MODE" = Godot ] && [ -n "$PCKT" ] && godot-pck repack
+            ;;
         d) [ "$MODE" = RPGM ] && [ -n "$MVDECRYPTOR" ] && mv-decrypt ;;
         D) [ "$MODE" = RPGM ] && [ -n "$MVDECRYPTOR" ] && mv-decrypt detect ;;
         r) [ "$MODE" = Ace ] && [ -n "$RGSSDECRYPTOR" ] && rgss-unpack ;;
@@ -349,28 +426,29 @@ function params-info {
     clear
     local PARALLEL
     [ -n "$PARALLEL_" ] && PARALLEL="$PARALLEL_" || PARALLEL="- ($_PARALLEL)"
-    cat <<END
-$HR
-  Runtime Parameters
-$HR
-GAMEDIR      : $(realpath "$GAMEDIR")
-MODE         : $MODE
-QUALITY      : $QUALITY (WMETHOD: $WMETHOD)
-OPACITY      : $(show-opacity "$OPACITY")
-MAX_DIM      : ${MAX_DIM}px (0=disabled)
-THREADS      : $THREADS (VPARALLEL: $VPARALLEL)
-ACCEL        : $ACCEL (Fast single-pass mobile VP9)
-ERRORSONLY   : $ERRORSONLY
-LOGLEVEL     : ${LOGLEVEL:-none}
-$HR
-PARALLEL_    : $PARALLEL
-FFMPEG       : $FFMPEG (v$(ffmpeg-version))
-CONVERT      : $CONVERT
-RPATOOL      : ${RPATOOL:-none}
-MVDECRYPTOR  : ${MVDECRYPTOR:-none}
-RGSSDECRYPTOR: ${RGSSDECRYPTOR:-none}
-$HR
-END
+    local REAL_DIR
+    REAL_DIR=$(realpath "$GAMEDIR")
+    echo "$HR"
+    echo "  Runtime Parameters"
+    echo "$HR"
+    printf "%-13s: %s\n" "GAMEDIR"       "$(fit60 "$REAL_DIR" 45)"
+    printf "%-13s: %s\n" "MODE"          "$MODE"
+    printf "%-13s: %s\n" "QUALITY"       "$QUALITY (WMETHOD: $WMETHOD)"
+    printf "%-13s: %s\n" "OPACITY"       "$(show-opacity "$OPACITY")"
+    printf "%-13s: %s\n" "MAX_DIM"       "${MAX_DIM}px (0=disabled)"
+    printf "%-13s: %s\n" "THREADS"       "$THREADS (VPARALLEL: $VPARALLEL)"
+    printf "%-13s: %s\n" "ACCEL"         "$ACCEL (1-pass mobile VP9)"
+    printf "%-13s: %s\n" "ERRORSONLY"    "$ERRORSONLY"
+    printf "%-13s: %s\n" "LOGLEVEL"      "$(fit60 "${LOGLEVEL:-none}" 45)"
+    echo "$HR"
+    printf "%-13s: %s\n" "PARALLEL_"     "$(fit60 "$PARALLEL" 45)"
+    printf "%-13s: %s\n" "FFMPEG"        "$(fit60 "$FFMPEG (v$(ffmpeg-version))" 45)"
+    printf "%-13s: %s\n" "CONVERT"       "$(fit60 "$CONVERT" 45)"
+    printf "%-13s: %s\n" "PCKT"          "$(fit60 "${PCKT:-none}" 45)"
+    printf "%-13s: %s\n" "RPATOOL"       "$(fit60 "${RPATOOL:-none}" 45)"
+    printf "%-13s: %s\n" "MVDECRYPTOR"   "$(fit60 "${MVDECRYPTOR:-none}" 45)"
+    printf "%-13s: %s\n" "RGSSDECRYPTOR" "$(fit60 "${RGSSDECRYPTOR:-none}" 45)"
+    echo "$HR"
     read -r -p "Press Enter to continue..."
 }
 
@@ -382,7 +460,8 @@ function rpa {
     for FILE in "${FILES[@]}"; do
         [ -e "$FILE" ] || continue
         [[ "$1" = unpack && ! -d "$FILE" ]] || [[ "$1" = repack && -d "$FILE" ]] || continue
-        echo "  $FILE" && (( COUNTER++ ))
+        printf "  %s\n" "$(fit60 "$FILE" 58)"
+        (( COUNTER++ ))
         if [ "$1" = unpack ]; then
             "$RPATOOL" -xo "$FILE~/" "$FILE" || { popd >/dev/null; exit 1; }
         else
@@ -395,6 +474,66 @@ function rpa {
     done
     popd >/dev/null || return
     read -r -p "${1^}ed $COUNTER archives. Press Enter..."
+}
+
+function godot-pck {
+    pushd "$GAMEDIR" >/dev/null || return
+    local COUNTER=0
+    local FILE
+
+    if [ "$1" = unpack ]; then
+        local -a TARGETS=( *.pck )
+        if (( ${#TARGETS[@]} == 0 )); then
+            local EMB_EXE
+            EMB_EXE="$(locate-embedded-exe)"
+            [ -n "$EMB_EXE" ] && TARGETS=( "$EMB_EXE" )
+        fi
+
+        for FILE in "${TARGETS[@]}"; do
+            [ -f "$FILE" ] || continue
+            local OUT_DIR="${FILE}.pck~"
+            if [ -d "$OUT_DIR" ]; then
+                printf "  %s\n" "$(fit60 "SKIP (exists): $OUT_DIR" 58)"
+                continue
+            fi
+            printf "  %s\n" "$(fit60 "Unpacking: $FILE -> $OUT_DIR/" 58)"
+            if "$PCKT" unpack "$FILE" "$OUT_DIR"; then
+                mv -- "$FILE" "${FILE}.bak"
+                (( COUNTER++ ))
+            else
+                rm -rf "$OUT_DIR"
+                log60 "! Error: Failed to unpack $FILE"
+            fi
+        done
+    else
+        local -a DIRS=( *.pck~ )
+        for FILE in "${DIRS[@]}"; do
+            [ -d "$FILE" ] || continue
+            local ORIG_NAME="${FILE%.pck~}"
+            local BAK_FILE="${ORIG_NAME}.bak"
+            if [ ! -f "$BAK_FILE" ]; then
+                printf "  %s\n" "$(fit60 "SKIP (missing .bak): $FILE" 58)"
+                continue
+            fi
+
+            printf "  %s\n" "$(fit60 "Repacking: $FILE -> $ORIG_NAME" 58)"
+            local -a PACK_ARGS=( pack "$FILE" "$ORIG_NAME" --copy-meta "$BAK_FILE" )
+            if [[ "${ORIG_NAME,,}" != *.pck ]] && has-embedded-pck "$BAK_FILE"; then
+                PACK_ARGS+=( --embed "$BAK_FILE" )
+            fi
+
+            if "$PCKT" "${PACK_ARGS[@]}"; then
+                rm -rf -- "$FILE" "$BAK_FILE"
+                (( COUNTER++ ))
+            else
+                rm -f -- "$ORIG_NAME"
+                log60 "! Error: Failed to repack $FILE"
+            fi
+        done
+    fi
+
+    popd >/dev/null || return
+    read -r -p "${1^}ed $COUNTER Godot archive(s). Press Enter..."
 }
 
 function mv-decrypt {
@@ -425,7 +564,7 @@ function rgss-unpack {
             && MSG="Unpacked '$FILE'. Press Enter..." \
             || MSG="Failed unpacking '$FILE'. Press Enter..."
     fi
-    read -r -p "$MSG"
+    read -r -p "$(fit60 "$MSG" 60)"
 }
 
 function filesize        { stat -c%s -- "$1"; }
@@ -555,8 +694,8 @@ function images {
     local EXT
     if [ "$MODE" = Ace ]; then
         for EXT in jpg jpeg png; do process image "$EXT" jpgpng; done
-    elif [ "$MODE" = RPGM ]; then
-        # Skip .gif in RPGM to prevent animated WebP rendering issues in mobile WebViews
+    elif [[ "$MODE" = @(RPGM|Godot) ]]; then
+        # Skip .gif in RPGM/Godot to prevent breaking animated GIF textures
         for EXT in webp jpg jpeg bmp png; do process image "$EXT"; done
     else
         for EXT in webp jpg jpeg bmp png gif; do process image "$EXT"; done
@@ -569,6 +708,10 @@ function audio {
         process audio mp3 mp3
         process audio wav mp3
         process audio ogg ogg
+    elif [ "$MODE" = Godot ]; then
+        # Godot AudioStreamOggVorbis uses Vorbis (.ogg); re-encode .ogg and .wav safely
+        process audio ogg ogg
+        process audio wav ogg
     else
         for EXT in mp3 wav ogg opus; do process audio "$EXT"; done
     fi
@@ -576,7 +719,7 @@ function audio {
 
 function video {
     local FMT EXT
-    [ "$MODE" = Ace ] && FMT=ogv || FMT=webm
+    [[ "$MODE" = @(Ace|Godot) ]] && FMT=ogv || FMT=webm
     for EXT in webm mp4 mkv m4v mpg mov ogv avi; do process video "$EXT" "$FMT"; done
 }
 
@@ -600,7 +743,11 @@ function show-progress {
     (( BAR_W - FILLED > 0 )) && printf -v PAD "%$(( BAR_W - FILLED ))s" "" && PAD="${PAD// /.}"
 
     set-term-title "$NAME: ${EXT^^} $CURRENT/$TOTAL (${PERCENT}%) $EXTRA {$GAME}"
-    printf "\r%-4s [%s%s] %3d%% (%d/%d) %-10s" "$EXT" "$BAR" "$PAD" "$PERCENT" "$CURRENT" "$TOTAL" "$EXTRA" >&2
+    # 4 + 1 + 26 + 1 + 4 + 1 + 11 + 1 + 11 = 60 columns
+    local COUNT_STR
+    COUNT_STR=$(printf "(%d/%d)" "$CURRENT" "$TOTAL")
+    printf "\r%-4s [%s%s] %3d%% %-11s %-11s" \
+        "${EXT:0:4}" "$BAR" "$PAD" "$PERCENT" "${COUNT_STR:0:11}" "${EXTRA:0:11}" >&2
     (( CURRENT == TOTAL && TOTAL > 0 )) && echo >&2
 }
 
@@ -615,7 +762,7 @@ function apply-conversion {
         _VERBOSE='--verbose'
     fi
 
-    [ -n "$_VERBOSE" ] && echo "Processing: $FILE" >&2
+    [ -n "$_VERBOSE" ] && log60 "Processing: $FILE"
 
     # Save original permissions and ensure write access
     local ORIG_PERMS
@@ -639,11 +786,11 @@ function apply-conversion {
 
     local CONV_STATUS=$?
     if (( CONV_STATUS != 0 )); then
-        echo "! ERROR: Conversion failed for $FILE" >&2
+        log60 "! ERROR: Conversion failed for $FILE"
     elif [ ! -s "$BUFFER" ]; then
-        echo "! ERROR: 0-byte output, reverting $FILE" >&2
+        log60 "! ERROR: 0-byte output, reverting $FILE"
     elif (( $(filesize "$BUFFER") >= $(filesize "$FILE") )); then
-        [ -n "$_VERBOSE" ] && echo "  SKIP: Larger than original ($FILE)" >&2
+        [ -n "$_VERBOSE" ] && log60 "  SKIP: Larger than original ($FILE)"
     else
         touch -r "$FILE" "$BUFFER"
         mv ${_VERBOSE:+"$_VERBOSE"} -- "$BUFFER" "$FILE" >&2
