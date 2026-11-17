@@ -1,12 +1,13 @@
 # Cruncher
 
 A CLI/TUI tool for compressing media files in Ren'Py, RPG Maker (MV/MZ/VX Ace), and other HTML/Electron games.  
-Based on [Cruncher by bas][Cruncher]; essentially a Linux/Termux port with extended functionality.
+Based on [Cruncher by bas][Cruncher]; a Linux/Termux port tuned for mobile ARM performance and compatibility with Android runtimes such as JoiPlay and MaldiVes.
 
 * [**Dependencies**](#dependencies)
 * [**Features**](#features)
   + [**Screenshots (TUI)**](#screenshots-tui)
 * [**Usage**](#usage)
+  + [**CLI Options & Environment Variables**](#cli-options--environment-variables)
   + [**Usage (tl;dr)**](#usage-tldr)
 * **Guides:**
   + [**How to compress RPG Maker MZ games**](#how-to-compress-rpg-maker-mz-games)
@@ -24,30 +25,40 @@ Based on [Cruncher by bas][Cruncher]; essentially a Linux/Termux port with exten
 
 **Optional (for extra features & speed):**
 * `parallel` (GNU Parallel for multi-core batch processing)
-* `python` / `mono` / `nodejs` (only required if using external archive/decryption helper tools)
+* `python3` / `mono` / `nodejs` (only required if using external archive/decryption helper tools such as [`MvDecryptor`][MvDecryptor], `rpatool`, or `soldata-decryptor`)
+
+**Termux Quick Install:**
+```bash
+pkg install bash coreutils ffmpeg imagemagick parallel
+```
 
 ## Features
 
-Functionally, it does the same thing as the original Windows script: it re-encodes media files into lightweight formats
-(WebP for images, Opus/Ogg/MP3 for audio, 2-pass WebM/OGV for video) **without changing file extensions**, expecting the game engine to detect file types by header/content rather than extension.
+Functionally, it performs the same core task as the original Windows script: it re-encodes media files into lightweight formats
+(WebP for images, Opus/Ogg/MP3 for audio, WebM/OGV for video) **without changing file extensions**, expecting the game engine to detect file types by header/content rather than extension.
 
 * **Multi-Engine Support:** Auto-detects and supports Ren'Py, RPG Maker (MV, MZ, VX Ace), and generic HTML/Other games.
+* **Native RPG Maker MV & MZ Detection:** Automatically recognizes both MV (`./www/data/System.json`) and MZ (`./data/System.json`) folder layouts without manual directory restructuring.
 * **Standalone & Portable:** Runs as a single standalone script that can be dropped directly into a game folder or installed globally (with optional symlinks like `RenCruncher`, `RPGMCruncher`, `AceCruncher`, or `OtherCruncher` to force a specific mode).
 * **Zero Python Core:** Depends only on standard open-source packages; Ren'Py's `webp-header-fix` is built natively using GNU coreutils (`dd`/`stat`).
 * **Safe Overwrites:** Never deletes files blindly—only overwrites the original if conversion succeeds and the new file is strictly smaller, while preserving original file permissions and timestamps.
 * **TUI Progress & ETA:** Displays real-time terminal title progress, a progress bar with ETA in sequential mode, and a `--bar` progress meter when using GNU Parallel.
-* **Hardware Acceleration:** Supports Intel/AMD VA-API VP9 hardware encoding (`-a`) for significantly faster video compression (also unlocks parallel video encoding), at the cost of slightly larger file sizes and minor quality loss in dark/3D scenes.
+* **Mobile & Emulator Compatibility (Termux / JoiPlay / MaldiVes):**
+  * **720p Max Dimension Cap (`-r` / `MAX_DIM`):** Downscales oversized videos and images (such as CGs, backgrounds, and parallaxes) to `720px` max without upscaling smaller files, while automatically skipping `RPGM` sprite sheets, tilesets, faces, and UI folders so grid coordinates remain intact.
+  * **Lossless WebP Alpha (`alpha-quality=100`):** Preserves exact transparency on soft glows, shadows, fog, and UI overlays while compressing RGB channels.
+  * **Mobile-Safe Video & Audio:** Outputs 8-bit `yuv420p` VP9 video with even dimensions, `120`-frame keyframe intervals for responsive seeking, and `20` ms Opus audio frames; skips `.gif` files in `RPGM` mode to prevent animated WebP glitches in Android WebViews.
+* **Fast Single-Pass Mobile VP9 (`-a`):** Uses tuned single-pass `libvpx-vp9` (`-speed 5`, `-tile-columns 2`) for 4x–6x faster video encoding on mobile ARM CPUs (with 2-pass `libvpx-vp9` as the default when `-a` is omitted).
 * **Built-in Archive & Decryption Integration:**
   * If [rpatool][rpatool] is detected, unpacks and repacks Ren'Py `.rpa` archives directly from the menu.
-  * If [`MvDecryptor`][MvDecryptor] is detected, decrypts RPGM MV/MZ assets directly from the menu (including automatic encryption key extraction/detection).
+  * If [`MvDecryptor`][MvDecryptor] is detected, decrypts RPG Maker MV/MZ assets (`.rpgmvp`/`.png_`, `.rpgmvo`/`.ogg_`, `.rpgmvm`/`.m4a_`) directly from the menu using low-memory chunked streaming, case-insensitive path resolution, and automatic PNG header key detection.
   * If [`RgssDecryptor`][RgssDecryptor script] is detected, unpacks RPGM VX Ace `Game.rgss3a` archives directly from the menu.
 * **See Also:** [Alternative tool RPGM MV/MZ][Alternative tool Rpgm MV MZ], [Alternative tool RPGM VX Ace][Alternative tool Rpgm VX Ace], and [Alternative tool Ren'Py][Alternative tool RenPy].
 
 > [!NOTE]
-> Some RPG Maker developers hardcode the encryption key into JS files instead of `System.json`. In `RPGM` mode, Cruncher automatically scans and prints keys found in both `System.json` and `js/` files on startup.
+> Some RPG Maker developers hardcode the encryption key into JS files instead of `System.json`. In `RPGM` mode, Cruncher automatically scans and prints keys found in both `System.json` and `js/` files on startup, and [`MvDecryptor`][MvDecryptor] can auto-detect the key directly from encrypted PNG headers (`-d` / menu option `D`).
 
 > [!NOTE]
-> **RPG Maker VX Ace** does not support WebP or WebM. In `Ace` mode, images are converted to JPEG or PNG (based on transparency threshold) and videos are converted to 2-pass OGV (Theora/Vorbis). Size reduction is typically up to ~50% (compared to ~80% on Ren'Py/MV/HTML), and `-a` (VA-API) has no effect.
+> **RPG Maker VX Ace** does not support WebP or WebM. In `Ace` mode, images are converted to JPEG or PNG (based on transparency threshold) and videos are converted to 2-pass OGV (Theora/Vorbis). Size reduction is typically up to ~50% (compared to ~80% on Ren'Py/MV/HTML), and `-a` has no effect.
 
 ### Screenshots (TUI)
 
@@ -59,27 +70,27 @@ Runtime parameters view (adjust starting values via CLI flags or environment var
 
 ## Usage
 
-Run `cruncher` in your terminal from the main game directory (ensure `chmod +x cruncher` has been applied). You can either place the script inside the game folder and run `./cruncher`, or install it to `/usr/bin/cruncher` (along with any mode symlinks) to run `cruncher` globally.
+Run `cruncher` in your terminal from the main game directory (ensure `chmod +x cruncher` has been applied). You can either place the script inside the game folder and run `./cruncher`, or install it to `/usr/bin/cruncher` (or `$PREFIX/bin/cruncher` in Termux) along with any mode symlinks to run `cruncher` globally.
 
-You can pass configuration either as **CLI flags** (`./cruncher -m RenPy -q 80`) or **environment variables** (`MODE=RenPy QUALITY=80 ./cruncher`). You can also pass `MODE` as a standalone positional argument at the end (`./cruncher -a RenPy`).
+You can pass configuration either as **CLI flags** (`./cruncher -m RPGM -a -q 80`) or **environment variables** (`MODE=RPGM ACCEL=true QUALITY=80 ./cruncher`). You can also pass `MODE` as a standalone positional argument at the end (`./cruncher -a RPGM`).
 
 ### CLI Options & Environment Variables
 
 | Flag | Env Variable | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `-m MODE` | `MODE` | *(auto)* | Target engine: `RenPy`, `RPGM`, `Ace`, or `Other`. Auto-detected by folder layout or script symlink name if omitted. |
-| `-d DIR` | `GAMEDIR` | *(by mode)* | Target resource folder (`./game` for Ren'Py, `./www` for RPGM, `.` for Ace/Other). |
+| `-d DIR` | `GAMEDIR` | *(by mode)* | Target resource folder (`./game` for Ren'Py, `./www` or `.` for RPGM MV/MZ, `.` for Ace/Other). |
 | `-q QUAL` | `QUALITY` | `80` | WebP/JPEG compression quality percentage (`1`–`100`). |
 | `-w METH` | `WMETHOD` | `5` | [WebP compression method][WebP method] (`0`–`6`). Higher values give better compression at slower speeds (`6` is noticeably slower than `5`). |
 | `-o OPAC` | `OPACITY` | `20480` | PNG alpha transparency threshold (`0`–`65535`, default `20480` ≈ `16.5%`) used in `Ace` mode to decide between PNG and smaller JPEG files. |
+| `-r MAX_DIM` | `MAX_DIM` | `720` | Maximum dimension cap in pixels (`0` = disabled). Downscales oversized videos and non-grid images without upscaling smaller files. |
 | `-t THRD` | `THREADS` | `0` (`1` w/ `-v`) | Number of `ffmpeg` encoding threads (`0` = autodetect optimal; defaults to `1` when `-v` is active). |
 | `-l LOG` | `LOGLEVEL` | `warning -stats` | Custom `ffmpeg` log flags (prepended with `-hide_banner -loglevel`). Pass `-` to disable custom log flags. |
 | `-p` | `PRETEND` | `false` | Dry-run mode: scans and counts matching media files without modifying anything. |
-| `-e` | `ERRORSONLY` | `false` | Quiet mode: prints errors only (`fatal -nostats`). |
-| `-a` | `ACCEL` | `false` | Enable hardware VA-API VP9 video encoding (enables parallel video encoding if `parallel` is installed). |
-| `-v` | `VPARALLEL` | `false` | Force parallel CPU video encoding (requires GNU `parallel`). |
+| `-e` | `ERRORSONLY` | `false` | Quiet mode: prints errors only (`fatal -nostats`) and suppresses verbose helper output. |
+| `-a` | `ACCEL` | `false` | Enable fast single-pass mobile VP9 video encoding (`-speed 5`). When `false`, uses higher-compression 2-pass VP9 (`-speed 3`). |
+| `-v` | `VPARALLEL` | `false` | Force parallel CPU video encoding across multiple files simultaneously (requires GNU `parallel`). |
 | `-1` | `PARALLEL_` | *(auto)* | Disable GNU Parallel (`-`), or set `PARALLEL_` env var to a custom `parallel` binary path. |
-| — | `VAAPI_DEVICE` | `/dev/dri/renderD128` | Hardware render device path used when `-a` (`ACCEL`) is enabled. |
 | — | `FFMPEG` | *(auto)* | Path to the `ffmpeg` executable. |
 | — | `CONVERT` | *(auto)* | Path to the ImageMagick executable (prefers `magick`, falls back to `convert`). |
 | — | `RPATOOL` | *(auto)* | Path to [rpatool][rpatool] (`rpatool` or `rpatool.py`) for `.rpa` archive operations. |
@@ -92,24 +103,31 @@ You can pass configuration either as **CLI flags** (`./cruncher -m RenPy -q 80`)
 ### Usage (tl;dr)
 
 1. Install required packages: `bash`, `ffmpeg`, and `imagemagick` (plus `parallel` for faster multi-core processing).
-2. Copy `cruncher` to `/usr/bin/` and mark it executable (`chmod +x /usr/bin/cruncher`).
+2. Copy `cruncher` to `/usr/bin/` (or `$PREFIX/bin/` on Termux) and mark it executable (`chmod +x`).
 3. Navigate to your unpacked game directory and run:
    ```bash
    cruncher
    ```
+   * Recommended for Termux / JoiPlay / MaldiVes (fast single-pass VP9 + 720p cap): `cruncher -a`
    * To force a specific engine mode: `cruncher RenPy` (or `RPGM`, `Ace`, `Other`).
-   * For faster hardware-accelerated video compression: `cruncher -a`
-   * For parallel CPU video compression (if your GPU lacks VP9 support): `cruncher -v`
+   * To disable resolution downscaling: `cruncher -r 0`
+   * For parallel multi-file CPU video compression (desktop/high-RAM systems): `cruncher -v`
 
 ---
 
 ## How to compress RPG Maker MZ games
 
-1. In the main game folder, create a subfolder named `www/` and move all game subfolders (`audio/`, `data/`, `img/`, `js/`, `movies/`, etc.) into `www/`.
-2. Run `cruncher` (auto-detects `RPGM` mode via `./www/data/System.json`).
-3. Select **`d`** (decrypt MV/MZ files) or **`D`** (decrypt with auto-detected key) from the menu to decrypt `.ogg_`, `.m4v_`, and `.png_` assets using [`MvDecryptor`][MvDecryptor].
-4. Select **`5`** (All Media) to compress all decrypted assets.
-5. Move all folders back out of `www/` into the root game directory and remove the empty `www/` folder.
+Cruncher and [`MvDecryptor`][MvDecryptor] natively support RPG Maker MZ's root directory layout (`./data/System.json` without a `www/` subfolder):
+
+1. Navigate to the main game folder and run `cruncher` (automatically detects `RPGM` mode via `./data/System.json`).
+2. *(If the game has encrypted `.png_`, `.ogg_`, or `.m4a_` assets)* Select **`d`** (decrypt MV/MZ files using `System.json`) or **`D`** (decrypt with auto-detected key from PNG headers) from the menu.
+   * Alternatively, you can run `mvdecryptor` standalone via CLI:
+     ```bash
+     mvdecryptor -d -v /path/to/game   # Auto-detect key (-d) with verbose output (-v); add -k to keep encrypted originals
+     ```
+3. Select **`5`** (All Media) to compress all decrypted assets.
+
+*(Note: If you encounter an older tool or plugin that strictly expects a `www/` layout, you can still pass `-d .` or temporarily organize assets under `www/`.)*
 
 ## How to unpack RPG Maker VX Ace game resources archive
 
@@ -147,7 +165,7 @@ RgssDecryptor --proj Game.rgss3a
    ```
 4. Mark it executable (`chmod +x`) and symlink it into `$PATH`:
    ```bash
-   sudo ln -s "$PWD/RgssDecryptor.sh" /usr/bin/RgssDecryptor
+   sudo ln -s "$PWD/RgssDecrypter.sh" /usr/bin/RgssDecryptor
    ```
 
 ## How to compress RPG Maker MV games with .soldata files
