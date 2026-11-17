@@ -101,12 +101,12 @@ GAMEDIR    Target folder (default: ./game | ./www | .)
 QUALITY    WebP/JPEG quality (default: 80)
 WMETHOD    WebP compression method 0-6 (default: 5)
 OPACITY    PNG transparency threshold (default: 20480=16.5%)
-MAX_DIM    Max dimension cap in px, 0 to disable (default: 720)
+MAX_DIM    Max dimension cap in px, 0=disable (default: 720)
 THREADS    ffmpeg threads (default: 0, or 1 w/ -v)
 LOGLEVEL   ffmpeg flags (default: warning -stats)
 -p         PRETEND: dry run, count files only
 -e         ERRORSONLY: print errors only
--a         ACCEL: fast single-pass VP9 encoding
+-a         ACCEL: fast single-pass mobile VP9 encoding
 -v         VPARALLEL: parallel video encoding
 -1         PARALLEL_: disable parallel processing
 
@@ -131,7 +131,7 @@ END
             MODE=Other
         elif [ -d ./game ] || [ -f "$(locate './*.py')" ] || [ -f "$(locate './*.rpyc')" ] || [ -f "$(locate './*.rpyb')" ]; then
             MODE=RenPy
-        elif [ -f "$(locate './www/data/System.json')" ]; then
+        elif [ -f "$(locate './www/data/System.json')" ] || [ -f "$(locate './data/System.json')" ]; then
             MODE=RPGM
         elif [ -f "$(locate './Game.ini')" ] && [ -f "$(locate './System/RGSS*.dll')" ]; then
             MODE=Ace
@@ -198,6 +198,7 @@ function init {
             ;;
         RPGM)
             : "${GAMEDIR:=$(locate './www')}"
+            : "${GAMEDIR:=.}"
             NAME=RPGMCruncher
             ;;
         Ace)
@@ -298,7 +299,7 @@ END
     fi
     if [ "$MODE" = RPGM ] && [ -n "$MVDECRYPTOR" ]; then
         cat <<END
-  d) Decrypt MV files     D) Decrypt MV (auto-key)
+  d) Decrypt MV/MZ files  D) Decrypt MV/MZ (auto-key)
 END
     fi
     if [ "$MODE" = Ace ] && [ -n "$RGSSDECRYPTOR" ]; then
@@ -335,8 +336,8 @@ END
             ;;
         x) [ "$MODE" = RenPy ] && [ -n "$RPATOOL" ] && rpa unpack ;;
         c) [ "$MODE" = RenPy ] && [ -n "$RPATOOL" ] && rpa repack ;;
-        d) [ "$MODE" = RPGM ] && [ -n "$MVDECRYPTOR" ] && "$MVDECRYPTOR" ;;
-        D) [ "$MODE" = RPGM ] && [ -n "$MVDECRYPTOR" ] && DETECT=yes "$MVDECRYPTOR" ;;
+        d) [ "$MODE" = RPGM ] && [ -n "$MVDECRYPTOR" ] && mv-decrypt ;;
+        D) [ "$MODE" = RPGM ] && [ -n "$MVDECRYPTOR" ] && mv-decrypt detect ;;
         r) [ "$MODE" = Ace ] && [ -n "$RGSSDECRYPTOR" ] && rgss-unpack ;;
         i) params-info ;;
         q|Q|exit) return 1 ;;
@@ -356,9 +357,9 @@ GAMEDIR      : $(realpath "$GAMEDIR")
 MODE         : $MODE
 QUALITY      : $QUALITY (WMETHOD: $WMETHOD)
 OPACITY      : $(show-opacity "$OPACITY")
-MAX_DIM      : ${MAX_DIM}px (0 = disabled)
+MAX_DIM      : ${MAX_DIM}px (0=disabled)
 THREADS      : $THREADS (VPARALLEL: $VPARALLEL)
-ACCEL        : $ACCEL (fast single-pass VP9)
+ACCEL        : $ACCEL (Fast single-pass mobile VP9)
 ERRORSONLY   : $ERRORSONLY
 LOGLEVEL     : ${LOGLEVEL:-none}
 $HR
@@ -394,6 +395,22 @@ function rpa {
     done
     popd >/dev/null || return
     read -r -p "${1^}ed $COUNTER archives. Press Enter..."
+}
+
+function mv-decrypt {
+    local -a args=()
+    [ "$1" = "detect" ] && args+=( -d )
+    $ERRORSONLY || args+=( -v )
+
+    # mvdecryptor expects the game root (parent of www) or the MZ root folder
+    local TARGET="$GAMEDIR"
+    [[ "${TARGET,,}" == */www || "${TARGET,,}" == www ]] && TARGET="$(dirname "$TARGET")"
+
+    if "$MVDECRYPTOR" "${args[@]}" "$TARGET"; then
+        read -r -p "Decryption finished. Press Enter..."
+    else
+        read -r -p "! Decryption failed. Press Enter..."
+    fi
 }
 
 function rgss-unpack {
@@ -539,7 +556,7 @@ function images {
     if [ "$MODE" = Ace ]; then
         for EXT in jpg jpeg png; do process image "$EXT" jpgpng; done
     elif [ "$MODE" = RPGM ]; then
-        # Skip gif in RPGM to avoid animated WebP rendering issues in mobile WebViews
+        # Skip .gif in RPGM to prevent animated WebP rendering issues in mobile WebViews
         for EXT in webp jpg jpeg bmp png; do process image "$EXT"; done
     else
         for EXT in webp jpg jpeg bmp png gif; do process image "$EXT"; done
