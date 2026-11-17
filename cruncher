@@ -101,16 +101,16 @@ GAMEDIR    Target folder (default: ./game | ./www | .)
 QUALITY    WebP/JPEG quality (default: 80)
 WMETHOD    WebP compression method 0-6 (default: 5)
 OPACITY    PNG transparency threshold (default: 20480=16.5%)
-MAX_DIM    Max height/dimension cap in px, 0 to disable (default: 720)
+MAX_DIM    Max dimension cap in px, 0 to disable (default: 720)
 THREADS    ffmpeg threads (default: 0, or 1 w/ -v)
 LOGLEVEL   ffmpeg flags (default: warning -stats)
 -p         PRETEND: dry run, count files only
 -e         ERRORSONLY: print errors only
--a         ACCEL: fast single-pass VP9 mobile preset (Termux/JoiPlay safe)
+-a         ACCEL: fast single-pass VP9 encoding
 -v         VPARALLEL: parallel video encoding
 -1         PARALLEL_: disable parallel processing
 
-Env vars also supported: FFMPEG, CONVERT, VAAPI_DEVICE, MAX_DIM,
+Env vars also supported: FFMPEG, CONVERT, VAAPI_DEVICE,
 PARALLEL_, RPATOOL, MVDECRYPTOR, RGSSDECRYPTOR.
 END
                     exit 1
@@ -358,7 +358,7 @@ QUALITY      : $QUALITY (WMETHOD: $WMETHOD)
 OPACITY      : $(show-opacity "$OPACITY")
 MAX_DIM      : ${MAX_DIM}px (0 = disabled)
 THREADS      : $THREADS (VPARALLEL: $VPARALLEL)
-ACCEL        : $ACCEL (Fast Single-Pass VP9)
+ACCEL        : $ACCEL (fast single-pass VP9)
 ERRORSONLY   : $ERRORSONLY
 LOGLEVEL     : ${LOGLEVEL:-none}
 $HR
@@ -417,26 +417,39 @@ function little-endian   { echo -ne "$(hex-bytes "$1" $(($1>>8)) $(($1>>16)) $((
 function webp-header-fix { little-endian $(($(filesize "$1") - 8)) | dd of="$1" obs=1 seek=4 conv=notrunc status=none; }
 export -f filesize hex-bytes little-endian webp-header-fix
 
+function can-resize-image {
+    local FILE="${1,,}"
+    [[ -z "$MAX_DIM" || "$MAX_DIM" -le 0 ]] && return 1
+    if [ "$MODE" = RPGM ]; then
+        # Avoid resizing grid-based spritesheets, tilesets, faces, or UI elements
+        case "$FILE" in
+            img/characters/*|img/tilesets/*|img/faces/*|img/system/*|img/sv_actors/*|img/sv_enemies/*)
+                return 1
+                ;;
+        esac
+    fi
+    return 0
+}
+export -f can-resize-image
+
 function convert-image {
     local -a resize_args=()
-    # Cap largest side at MAX_DIM only if larger (>), skipping RPGM sprite sheets/tilesets/faces/system UI
-    if (( MAX_DIM > 0 )); then
-        if [ "$MODE" != RPGM ] || [[ "${1,,}" != img/@(characters|tilesets|faces|system|sv_actors|sv_enemies)/* ]]; then
-            resize_args=(-resize "${MAX_DIM}x${MAX_DIM}>")
-        fi
-    fi
-    "$CONVERT" "$VERBOSE" "$1" "${resize_args[@]}" -quality "$QUALITY" -define webp:method="$WMETHOD" WEBP:"$2"
+    can-resize-image "$1" && resize_args=( -resize "${MAX_DIM}x${MAX_DIM}>" )
+    # Keep alpha channel lossless (alpha-quality=100) so soft glows, shadows & overlays do not wash out
+    "$CONVERT" "$VERBOSE" "$1" "${resize_args[@]}" \
+        -quality "$QUALITY" -define webp:method="$WMETHOD" -define webp:alpha-quality=100 \
+        WEBP:"$2"
 }
 
 function convert-parallax {
     local -a resize_args=()
-    (( MAX_DIM > 0 )) && resize_args=(-resize "${MAX_DIM}x${MAX_DIM}>")
+    can-resize-image "$1" && resize_args=( -resize "${MAX_DIM}x${MAX_DIM}>" )
     "$CONVERT" "$VERBOSE" "$1" "${resize_args[@]}" -define webp:lossless=true WEBP:"$2"
 }
 
 function convert-jpgpng {
     local -a resize_args=()
-    (( MAX_DIM > 0 )) && resize_args=(-resize "${MAX_DIM}x${MAX_DIM}>")
+    can-resize-image "$1" && resize_args=( -resize "${MAX_DIM}x${MAX_DIM}>" )
     # check for transparent pixels
     if (( $("$CONVERT" "$1" -alpha extract -format '%[min]' info:) < OPACITY )); then
         # for PNG: -quality {compression-level}{filter-type}
@@ -470,12 +483,10 @@ function convert-webm {
     local -a vlog_args=()
     [ -n "$VLOGLEVEL" ] && read -ra vlog_args <<< "$VLOGLEVEL"
 
-    # Cap height at MAX_DIM (no upscaling), ensure even dimensions & 8-bit yuv420p for JoiPlay/MaldiVes
+    # Cap resolution at MAX_DIM (default 720p) without upscaling, enforce even dimensions & 8-bit yuv420p for JoiPlay/MaldiVes
     local VF_ARGS="format=yuv420p"
-    if (( MAX_DIM > 0 )); then
+    if [[ -n "$MAX_DIM" && "$MAX_DIM" -gt 0 ]]; then
         VF_ARGS="scale=-2:'min(${MAX_DIM},ih)',format=yuv420p"
-    else
-        VF_ARGS="scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p"
     fi
 
     if $ACCEL; then
@@ -508,9 +519,14 @@ function convert-ogv {
     local -a vlog_args=()
     [ -n "$VLOGLEVEL" ] && read -ra vlog_args <<< "$VLOGLEVEL"
 
-    "$FFMPEG" -y -i "$1" -c:v libtheora -threads "$THREADS" -pass 1 -g 240 -vsync 2 -an \
+    local -a vf_args=()
+    if [[ -n "$MAX_DIM" && "$MAX_DIM" -gt 0 ]]; then
+        vf_args=( -vf "scale=-2:'min(${MAX_DIM},ih)',format=yuv420p" )
+    fi
+
+    "$FFMPEG" -y -i "$1" "${vf_args[@]}" -c:v libtheora -threads "$THREADS" -pass 1 -g 240 -vsync 2 -an \
         -passlogfile "$PASSLOG" -f ogv /dev/null "${vlog_args[@]}" && \
-    "$FFMPEG" -y -i "$1" -c:v libtheora -threads "$THREADS" -pass 2 -g 240 -vsync 2 -c:a libvorbis -compression_level 10 \
+    "$FFMPEG" -y -i "$1" "${vf_args[@]}" -c:v libtheora -threads "$THREADS" -pass 2 -g 240 -vsync 2 -c:a libvorbis -compression_level 10 \
         -passlogfile "$PASSLOG" -f ogv "$2" "${vlog_args[@]}"
     local STATUS=$?
     rm -f "${PASSLOG}"*
@@ -523,7 +539,7 @@ function images {
     if [ "$MODE" = Ace ]; then
         for EXT in jpg jpeg png; do process image "$EXT" jpgpng; done
     elif [ "$MODE" = RPGM ]; then
-        # Skip gif in RPGM to avoid animated WebP crashes in mobile WebViews
+        # Skip gif in RPGM to avoid animated WebP rendering issues in mobile WebViews
         for EXT in webp jpg jpeg bmp png; do process image "$EXT"; done
     else
         for EXT in webp jpg jpeg bmp png gif; do process image "$EXT"; done
