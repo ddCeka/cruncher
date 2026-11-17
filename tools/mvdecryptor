@@ -1,77 +1,194 @@
-#!/bin/env python3
-#
-# RPG Maker MV Decryption Script
-# Created By SilicaAndPina 1/12/2018
-# (+patched for CLI use, py3 compatibility and key autodetection)
-#
+#!/usr/bin/env python3
+"""
+RPG Maker MV / MZ Decryption Script
+Optimized for Linux Desktop & Android Termux.
+"""
 
-import binascii # Imports the "binascii" library
-import os # Imports the "OS" library
+import argparse
+import binascii
+import json
+import os
 import sys
+from pathlib import Path
 
-EXTENSIONS = {b'.rpgmvo': b'.ogg',  b'.ogg_': b'.ogg',  b'.rpgmvm': b'.m4a',  b'.m4a_': b'.m4a',  b'.rpgmvp': b'.png',  b'.png_': b'.png'}
-RPGMV_PREFIX = b"5250474D560000000003010000000000"
-PNG_HEADER = b"89504E470D0A1A0A0000000D49484452"
+EXTENSIONS = {
+    ".rpgmvo": ".ogg",
+    ".ogg_": ".ogg",
+    ".rpgmvm": ".m4a",
+    ".m4a_": ".m4a",
+    ".rpgmvp": ".png",
+    ".png_": ".png",
+}
+
+RPGMV_PREFIX = bytes.fromhex("5250474D560000000003010000000000")
+PNG_HEADER = bytes.fromhex("89504E470D0A1A0A0000000D49484452")
+CHUNK_SIZE = 65536  # 64 KB chunks to keep RAM usage minimal on mobile
 
 
-def xor(data, key): # XOR Encryption / Decryption Algorithm
-    l = len(key) # Sets l to length of key.
-    return bytearray(((data[i] ^ key[i % l]) for i in range(0, len(data))))  # Do complex MATH stuff and convert the result to a bytearray.
+def is_termux() -> bool:
+    """Detect if running inside Android Termux."""
+    return "com.termux" in os.environ.get("PREFIX", "") or Path("/data/data/com.termux").exists()
 
-def findKey(gameDir): # Function for finding decryption key
-    key = open(gameDir + b"/www/data/System.json", 'rb').read() # Read System.json
-    key = key[key.index(b'"encryptionKey":"') + len('"encryptionKey":"'):] # Find "encryptionKey":" in System.json
-    key = key[:key.index(b'"}')] # Finish string at "}
-    return bytearray(binascii.unhexlify(key)) # Decode Hexadecimal and convert to ByteArray.
 
-def decryptFilename(encryptedFilename): # Function for "Decrypting" a filename
-    k = next(k for k in EXTENSIONS if encryptedFilename.endswith(k))
-    return k and encryptedFilename[:-len(k)] + EXTENSIONS[k]
+def resolve_insensitive(base: Path, *parts: str) -> Path:
+    """Resolve subpaths case-insensitively (fixes Windows->Linux casing issues)."""
+    current = base
+    for part in parts:
+        candidate = current / part
+        if candidate.exists():
+            current = candidate
+            continue
+        if current.is_dir():
+            match = next((p for p in current.iterdir() if p.name.lower() == part.lower()), None)
+            if match:
+                current = match
+                continue
+        return current / part
+    return current
 
-def isEncryptedFile(path): # Function for determining if the specified path is an Encrypted RMMV File..
-    return any(path.endswith(k) for k in EXTENSIONS)
 
-def decryptFile(encryptedFilename, key): # Function for decrypting a file.
-    file = open(encryptedFilename, 'rb').read() # Read encrypted file.
-    file = file[16:] # Remove file header.
-    cyphertext = bytearray(file[:16]) # Read encrypted file header.
-    plaintext = bytes(xor(cyphertext, key)) # Decrypt file header
-    file = file[16:] # Remove decrypted file header
-    open(decryptFilename(encryptedFilename), 'wb').write(plaintext + file) # Write decrypted file header + rest of file to disk as Decrypted Filename..
+def xor_bytes(data: bytes, key: bytes) -> bytes:
+    """XOR data against a repeating key."""
+    key_len = len(key)
+    return bytes(b ^ key[i % key_len] for i, b in enumerate(data))
 
-def detectKeyFromPng(encryptedFilename):
-    file = open(encryptedFilename, 'rb').read() # Read encrypted file.
-    if file[:16] == binascii.unhexlify(RPGMV_PREFIX): # Ensure file header.
-        file = file[16:] # Remove file header.
-        cyphertext = bytearray(file[:16]) # Read encrypted file header.
-        return bytes( xor(cyphertext, binascii.unhexlify(PNG_HEADER)) )
 
-def detectKey(gameDir):
-    for path, dirs, files in os.walk(gameDir + b"/www"):
-        for f in files:
-            ext = next((EXTENSIONS[k] for k in EXTENSIONS if f.endswith(k)), None)
-            if ext == b".png":
-                return detectKeyFromPng( os.path.join(path, f) )
+def get_base_dir(game_dir: Path) -> Path:
+    """Support both RPG Maker MV (/www) and MZ (root folder)."""
+    www_dir = resolve_insensitive(game_dir, "www")
+    return www_dir if www_dir.is_dir() else game_dir
 
-def decryptEntireGame(gameDir, key = None): # Function for decrypting an entire game folder.
-    key = key or findKey(gameDir) # Find Decryption Key
-    for path, dirs, files in os.walk(gameDir + b"/www"): # List all files inside the Game's project folder.
-        for f in files: # For all files in Game's WWW folder.
-            if isEncryptedFile(os.path.join(path, f)): # If its an encrypted RM MV File...
-                if os.environ.get('VERBOSE', "").lower() == 'yes':
-                    print(os.path.join(path, f).decode('utf-8'))
-                decryptFile(os.path.join(path, f),key) # Decrypt the file.
-                os.remove(os.path.join(path, f)) # Delete encrypted file
-    SystemJson = open(gameDir + b"/www/data/System.json", 'rb').read() # Reads System.json
-    SystemJson = SystemJson.replace(b'"hasEncryptedImages":true', b'"hasEncryptedImages":false') # Sets hasEncryptedImages to FALSE
-    SystemJson = SystemJson.replace(b'"hasEncryptedAudio":true', b'"hasEncryptedAudio":false') # Sets hasEncryptedAudio to FALSE
-    open(gameDir + b"/www/data/System.json", 'wb').write(SystemJson) # Writes new System.json to disk
-    open(gameDir + b"/www/Game.rpgproject", 'wb').write(b"RPGMV 1.0.0") # Creates Editable RPG Maker MV Project File
 
-if __name__ == '__main__':
-    key = None
-    if os.environ.get('DETECT', "").lower() == 'yes':
-        key = detectKey(b'.')
-        key and print( binascii.hexlify(key) )
-    decryptEntireGame(b'.', key)
-    print("...MV decryption complete")
+def find_key(base_dir: Path) -> bytes:
+    """Extract the encryption key from System.json."""
+    system_json_path = resolve_insensitive(base_dir, "data", "System.json")
+    if not system_json_path.is_file():
+        raise FileNotFoundError(f"Could not find System.json at {system_json_path}")
+
+    with system_json_path.open("r", encoding="utf-8-sig") as f:
+        data = json.load(f)
+
+    hex_key = data.get("encryptionKey")
+    if not hex_key:
+        raise ValueError("encryptionKey is missing or empty in System.json")
+    return bytes.fromhex(hex_key)
+
+
+def detect_key_from_png(encrypted_path: Path) -> bytes | None:
+    """Derive the XOR key using only the first 32 bytes of an encrypted PNG."""
+    try:
+        with encrypted_path.open("rb") as f:
+            header = f.read(32)
+        if len(header) == 32 and header[:16] == RPGMV_PREFIX:
+            return xor_bytes(header[16:32], PNG_HEADER)
+    except OSError:
+        return None
+    return None
+
+
+def detect_key(base_dir: Path) -> bytes | None:
+    """Scan directory for an encrypted PNG to auto-detect the key."""
+    for file_path in base_dir.rglob("*"):
+        if file_path.is_file() and EXTENSIONS.get(file_path.suffix.lower()) == ".png":
+            key = detect_key_from_png(file_path)
+            if key:
+                return key
+    return None
+
+
+def decrypt_file(encrypted_path: Path, key: bytes, keep_original: bool = False) -> bool:
+    """Decrypt a single file using low-memory chunked streaming."""
+    new_ext = EXTENSIONS[encrypted_path.suffix.lower()]
+    output_path = encrypted_path.with_suffix(new_ext)
+
+    with encrypted_path.open("rb") as src:
+        header = src.read(16)
+        if header != RPGMV_PREFIX:
+            return False
+
+        encrypted_header = src.read(16)
+        if len(encrypted_header) < 16:
+            return False
+
+        decrypted_header = xor_bytes(encrypted_header, key)
+
+        with output_path.open("wb") as dst:
+            dst.write(decrypted_header)
+            while True:
+                chunk = src.read(CHUNK_SIZE)
+                if not chunk:
+                    break
+                dst.write(chunk)
+
+    if not keep_original:
+        encrypted_path.unlink()
+    return True
+
+
+def decrypt_game(game_dir: Path, detect: bool = False, keep: bool = False, verbose: bool = False) -> None:
+    """Decrypt all assets in an RPG Maker MV/MZ game directory."""
+    if not game_dir.is_dir():
+        raise FileNotFoundError(f"Directory does not exist: {game_dir}")
+
+    base_dir = get_base_dir(game_dir)
+
+    if detect:
+        key = detect_key(base_dir)
+        if not key:
+            raise RuntimeError("Could not auto-detect decryption key from PNG files.")
+        print(f"Detected Key: {binascii.hexlify(key).decode('ascii')}")
+    else:
+        key = find_key(base_dir)
+
+    count = 0
+    for file_path in base_dir.rglob("*"):
+        if file_path.is_file() and file_path.suffix.lower() in EXTENSIONS:
+            if verbose:
+                print(file_path)
+            if decrypt_file(file_path, key, keep_original=keep):
+                count += 1
+
+    # Update System.json flags cleanly
+    system_json_path = resolve_insensitive(base_dir, "data", "System.json")
+    if system_json_path.is_file():
+        with system_json_path.open("r", encoding="utf-8-sig") as f:
+            system_data = json.load(f)
+
+        system_data["hasEncryptedImages"] = False
+        system_data["hasEncryptedAudio"] = False
+
+        with system_json_path.open("w", encoding="utf-8") as f:
+            json.dump(system_data, f, ensure_ascii=False)
+
+    # Create editable project file
+    project_file = base_dir / "Game.rpgproject"
+    project_file.write_text("RPGMV 1.0.0", encoding="utf-8")
+    print(f"...MV/MZ decryption complete ({count} files decrypted)")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Decrypt RPG Maker MV/MZ assets (Linux & Termux).")
+    parser.add_argument("directory", nargs="?", default=".", type=Path, help="Game folder (default: current dir)")
+    parser.add_argument("-d", "--detect", action="store_true", help="Auto-detect key from PNG header")
+    parser.add_argument("-k", "--keep", action="store_true", help="Keep original encrypted files")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Print each decrypted file path")
+    args = parser.parse_args()
+
+    # Preserve backwards compatibility with original environment variables
+    detect = args.detect or os.environ.get("DETECT", "").lower() == "yes"
+    verbose = args.verbose or os.environ.get("VERBOSE", "").lower() == "yes"
+
+    try:
+        decrypt_game(args.directory.resolve(), detect=detect, keep=args.keep, verbose=verbose)
+    except PermissionError as exc:
+        print(f"Permission denied: {exc}", file=sys.stderr)
+        if is_termux():
+            print("Hint: On Termux, run 'termux-setup-storage' first to access /sdcard.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
