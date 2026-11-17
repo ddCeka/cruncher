@@ -1,5 +1,5 @@
 #!/bin/bash
-# accepted vars: MODE (RenPy|RPGM|Ace|Other), GAMEDIR (./game|./www|.), FFMPEG, CONVERT, VAAPI_DEVICE, QUALITY (80), THREADS (0|1)
+# accepted vars: MODE (RenPy|RPGM|Ace|Other), GAMEDIR (./game|./www|.), FFMPEG, CONVERT, VAAPI_DEVICE, QUALITY (80), MAX_DIM (720), THREADS (0|1)
 
 shopt -s dotglob    # .files matching in globs
 shopt -s globstar   # ** in globs
@@ -75,13 +75,14 @@ function validate-uint {
 function parse-args {
     NAME=$(basename "$0")
     if (( $# > 0 )); then
-        while getopts "m:d:q:w:o:t:l:peav1" OPTION; do
+        while getopts "m:d:q:w:o:r:t:l:peav1" OPTION; do
             case "$OPTION" in
                 m) MODE=$OPTARG ;;
                 d) GAMEDIR=$OPTARG ;;
                 q) QUALITY=$OPTARG ;;
                 w) WMETHOD=$OPTARG ;;
                 o) OPACITY=$OPTARG ;;
+                r) MAX_DIM=$OPTARG ;;
                 t) THREADS=$OPTARG ;;
                 l) LOGLEVEL=${OPTARG:--} ;;
                 p) PRETEND=true ;;
@@ -93,22 +94,23 @@ function parse-args {
                     cat <<END
 Usage:
 cruncher [-m MODE] [-d DIR] [-q QUAL] [-w METH] [-o OPAC]
-         [-t THRD] [-l LOG] [-p] [-e] [-a] [-v] [-1] [MODE]
+         [-r MAX_DIM] [-t THRD] [-l LOG] [-p] [-e] [-a] [-v] [-1] [MODE]
 
 MODE       RenPy | RPGM | Ace | Other (auto-detected)
 GAMEDIR    Target folder (default: ./game | ./www | .)
 QUALITY    WebP/JPEG quality (default: 80)
 WMETHOD    WebP compression method 0-6 (default: 5)
 OPACITY    PNG transparency threshold (default: 20480=16.5%)
+MAX_DIM    Max height/dimension cap in px, 0 to disable (default: 720)
 THREADS    ffmpeg threads (default: 0, or 1 w/ -v)
 LOGLEVEL   ffmpeg flags (default: warning -stats)
 -p         PRETEND: dry run, count files only
 -e         ERRORSONLY: print errors only
--a         ACCEL: enable VA-API VP9 acceleration
+-a         ACCEL: fast single-pass VP9 mobile preset (Termux/JoiPlay safe)
 -v         VPARALLEL: parallel video encoding
 -1         PARALLEL_: disable parallel processing
 
-Env vars also supported: FFMPEG, CONVERT, VAAPI_DEVICE,
+Env vars also supported: FFMPEG, CONVERT, VAAPI_DEVICE, MAX_DIM,
 PARALLEL_, RPATOOL, MVDECRYPTOR, RGSSDECRYPTOR.
 END
                     exit 1
@@ -224,6 +226,7 @@ function init {
     : "${QUALITY:=80}"
     : "${WMETHOD:=5}"
     : "${OPACITY:=20480}"
+    : "${MAX_DIM:=720}"
     [ "$PRETEND" = true ] || PRETEND=false
     [ "$ACCEL" = true ] || ACCEL=false
     [ "$VPARALLEL" = true ] || VPARALLEL=false
@@ -235,6 +238,7 @@ function init {
     validate-uint "$QUALITY" "QUALITY"
     validate-uint "$WMETHOD" "WMETHOD"
     validate-uint "$OPACITY" "OPACITY"
+    validate-uint "$MAX_DIM" "MAX_DIM"
     validate-uint "$THREADS" "THREADS"
 
     $ERRORSONLY && VERBOSE='-quiet' || VERBOSE='-verbose'
@@ -352,8 +356,9 @@ GAMEDIR      : $(realpath "$GAMEDIR")
 MODE         : $MODE
 QUALITY      : $QUALITY (WMETHOD: $WMETHOD)
 OPACITY      : $(show-opacity "$OPACITY")
+MAX_DIM      : ${MAX_DIM}px (0 = disabled)
 THREADS      : $THREADS (VPARALLEL: $VPARALLEL)
-ACCEL        : $ACCEL ($VAAPI_DEVICE)
+ACCEL        : $ACCEL (Fast Single-Pass VP9)
 ERRORSONLY   : $ERRORSONLY
 LOGLEVEL     : ${LOGLEVEL:-none}
 $HR
@@ -412,15 +417,32 @@ function little-endian   { echo -ne "$(hex-bytes "$1" $(($1>>8)) $(($1>>16)) $((
 function webp-header-fix { little-endian $(($(filesize "$1") - 8)) | dd of="$1" obs=1 seek=4 conv=notrunc status=none; }
 export -f filesize hex-bytes little-endian webp-header-fix
 
-function convert-image    { "$CONVERT" "$VERBOSE" "$1" -quality "$QUALITY" -define webp:method="$WMETHOD" WEBP:"$2"; }
-function convert-parallax { "$CONVERT" "$VERBOSE" "$1" -define webp:lossless=true WEBP:"$2"; }
-function convert-jpgpng   {
+function convert-image {
+    local -a resize_args=()
+    # Cap largest side at MAX_DIM only if larger (>), skipping RPGM sprite sheets/tilesets/faces/system UI
+    if (( MAX_DIM > 0 )); then
+        if [ "$MODE" != RPGM ] || [[ "${1,,}" != img/@(characters|tilesets|faces|system|sv_actors|sv_enemies)/* ]]; then
+            resize_args=(-resize "${MAX_DIM}x${MAX_DIM}>")
+        fi
+    fi
+    "$CONVERT" "$VERBOSE" "$1" "${resize_args[@]}" -quality "$QUALITY" -define webp:method="$WMETHOD" WEBP:"$2"
+}
+
+function convert-parallax {
+    local -a resize_args=()
+    (( MAX_DIM > 0 )) && resize_args=(-resize "${MAX_DIM}x${MAX_DIM}>")
+    "$CONVERT" "$VERBOSE" "$1" "${resize_args[@]}" -define webp:lossless=true WEBP:"$2"
+}
+
+function convert-jpgpng {
+    local -a resize_args=()
+    (( MAX_DIM > 0 )) && resize_args=(-resize "${MAX_DIM}x${MAX_DIM}>")
     # check for transparent pixels
     if (( $("$CONVERT" "$1" -alpha extract -format '%[min]' info:) < OPACITY )); then
         # for PNG: -quality {compression-level}{filter-type}
-        "$CONVERT" -regard-warnings "$VERBOSE" "$1" -quality 95 PNG:"$2"
+        "$CONVERT" -regard-warnings "$VERBOSE" "$1" "${resize_args[@]}" -quality 95 PNG:"$2"
     else
-        "$CONVERT" -regard-warnings "$VERBOSE" "$1" -quality "$QUALITY" JPEG:"$2"
+        "$CONVERT" -regard-warnings "$VERBOSE" "$1" "${resize_args[@]}" -quality "$QUALITY" JPEG:"$2"
     fi
 }
 export -f convert-parallax convert-image convert-jpgpng
@@ -448,21 +470,31 @@ function convert-webm {
     local -a vlog_args=()
     [ -n "$VLOGLEVEL" ] && read -ra vlog_args <<< "$VLOGLEVEL"
 
-    if $ACCEL; then
-        "$FFMPEG" -y -i "$1" -vaapi_device "$VAAPI_DEVICE" -vf 'format=nv12,hwupload' -c:v vp9_vaapi -threads "$THREADS" -pass 1 -b:v 0 \
-            -global_quality:v 150 -g 240 "$FPSMODE" vfr -an \
-            -passlogfile "$PASSLOG" -f webm /dev/null "${vlog_args[@]}" && \
-        "$FFMPEG" -y -i "$1" -vaapi_device "$VAAPI_DEVICE" -vf 'format=nv12,hwupload' -c:v vp9_vaapi -threads "$THREADS" -pass 2 -b:v 0 \
-            -global_quality:v 150 -g 240 "$FPSMODE" vfr -c:a libopus -vbr on -compression_level:a 10 -frame_duration 60 -application audio -b:a 32k \
-            -passlogfile "$PASSLOG" -f webm "$2" "${vlog_args[@]}"
+    # Cap height at MAX_DIM (no upscaling), ensure even dimensions & 8-bit yuv420p for JoiPlay/MaldiVes
+    local VF_ARGS="format=yuv420p"
+    if (( MAX_DIM > 0 )); then
+        VF_ARGS="scale=-2:'min(${MAX_DIM},ih)',format=yuv420p"
     else
-        "$FFMPEG" -y -i "$1" -c:v libvpx-vp9 -threads "$THREADS" -row-mt 1 -quality good -pass 1 -b:v 0 -crf 40 -speed 4 \
-            -tile-columns 4 -frame-parallel 1 \
-            -g 240 "$FPSMODE" vfr -an \
+        VF_ARGS="scale=trunc(iw/2)*2:trunc(ih/2)*2,format=yuv420p"
+    fi
+
+    if $ACCEL; then
+        # Fast single-pass VP9 tuned for Termux ARM CPUs (JoiPlay/MaldiVes safe)
+        "$FFMPEG" -y -i "$1" -vf "$VF_ARGS" \
+            -c:v libvpx-vp9 -threads "$THREADS" -row-mt 1 -quality good \
+            -b:v 0 -crf 38 -speed 5 -tile-columns 2 -frame-parallel 1 -g 120 \
+            -c:a libopus -vbr on -compression_level:a 10 -frame_duration 20 -application audio -b:a 32k \
+            -f webm "$2" "${vlog_args[@]}"
+    else
+        # Higher compression 2-pass VP9
+        "$FFMPEG" -y -i "$1" -vf "$VF_ARGS" \
+            -c:v libvpx-vp9 -threads "$THREADS" -row-mt 1 -quality good -pass 1 \
+            -b:v 0 -crf 38 -speed 5 -tile-columns 2 -frame-parallel 1 -g 120 -an \
             -passlogfile "$PASSLOG" -f webm /dev/null "${vlog_args[@]}" && \
-        "$FFMPEG" -y -i "$1" -c:v libvpx-vp9 -threads "$THREADS" -row-mt 1 -quality good -pass 2 -b:v 0 -crf 40 -speed 1 \
-            -tile-columns 4 -frame-parallel 1 -auto-alt-ref 1 -lag-in-frames 25 \
-            -g 240 "$FPSMODE" vfr -c:a libopus -vbr on -compression_level 10 -frame_duration 60 -application audio -b:a 32k \
+        "$FFMPEG" -y -i "$1" -vf "$VF_ARGS" \
+            -c:v libvpx-vp9 -threads "$THREADS" -row-mt 1 -quality good -pass 2 \
+            -b:v 0 -crf 38 -speed 3 -tile-columns 2 -frame-parallel 1 -auto-alt-ref 1 -lag-in-frames 16 -g 120 \
+            -c:a libopus -vbr on -compression_level:a 10 -frame_duration 20 -application audio -b:a 32k \
             -passlogfile "$PASSLOG" -f webm "$2" "${vlog_args[@]}"
     fi
     local STATUS=$?
@@ -490,6 +522,9 @@ function images {
     local EXT
     if [ "$MODE" = Ace ]; then
         for EXT in jpg jpeg png; do process image "$EXT" jpgpng; done
+    elif [ "$MODE" = RPGM ]; then
+        # Skip gif in RPGM to avoid animated WebP crashes in mobile WebViews
+        for EXT in webp jpg jpeg bmp png; do process image "$EXT"; done
     else
         for EXT in webp jpg jpeg bmp png gif; do process image "$EXT"; done
     fi
@@ -615,8 +650,8 @@ function process {
             local START=$SECONDS
             set-term-title "$NAME: ${EXT^^} | $TOTAL $TYPE files {$GAME}"
 
-            if [ -n "$PARALLEL_" ] && { [ "$TYPE" != video ] || $VPARALLEL || { $ACCEL && [ "$CONV_TYPE" = webm ]; }; }; then
-                export GAMEDIR MODE CONVERT FFMPEG VAAPI_DEVICE FPSMODE QUALITY WMETHOD OPACITY THREADS LOGLEVEL VLOGLEVEL ACCEL VERBOSE VPARALLEL TMP_ROOT
+            if [ -n "$PARALLEL_" ] && { [ "$TYPE" != video ] || $VPARALLEL; }; then
+                export GAMEDIR MODE CONVERT FFMPEG VAAPI_DEVICE FPSMODE QUALITY WMETHOD OPACITY MAX_DIM THREADS LOGLEVEL VLOGLEVEL ACCEL VERBOSE VPARALLEL TMP_ROOT
                 export GAME NAME TOTAL START AV_LOG_FORCE_COLOR=yes
                 DONE="$(mktemp -p "$TMP_ROOT" "done-$EXT.XXXXXX")"
                 export DONE
