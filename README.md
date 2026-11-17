@@ -1,6 +1,6 @@
 # Cruncher
 
-A CLI/TUI tool for compressing media files in Ren'Py, RPG Maker (MV/MZ/VX Ace), and other HTML/Electron games.  
+A CLI/TUI tool for compressing media files in Godot (3 & 4), Ren'Py, RPG Maker (MV/MZ/VX Ace), and other HTML/Electron games.  
 Based on [Cruncher by bas][Cruncher]; a Linux/Termux port tuned for mobile ARM performance and compatibility with Android runtimes such as JoiPlay and MaldiVes.
 
 * [**Dependencies**](#dependencies)
@@ -10,6 +10,7 @@ Based on [Cruncher by bas][Cruncher]; a Linux/Termux port tuned for mobile ARM p
   + [**CLI Options & Environment Variables**](#cli-options--environment-variables)
   + [**Usage (tl;dr)**](#usage-tldr)
 * **Guides:**
+  + [**How to compress Godot games**](#how-to-compress-godot-games)
   + [**How to compress RPG Maker MZ games**](#how-to-compress-rpg-maker-mz-games)
   + [**How to unpack RPG Maker VX Ace game resources archive**](#how-to-unpack-rpg-maker-vx-ace-game-resources-archive)
   + [**How to compress RPG Maker MV games with .soldata files**](#how-to-compress-rpg-maker-mv-games-with-soldata-files)
@@ -25,11 +26,19 @@ Based on [Cruncher by bas][Cruncher]; a Linux/Termux port tuned for mobile ARM p
 
 **Optional (for extra features & speed):**
 * `parallel` (GNU Parallel for multi-core batch processing)
-* `python3` / `mono` / `nodejs` (only required if using external archive/decryption helper tools such as [`MvDecryptor`][MvDecryptor], `rpatool`, or `soldata-decryptor`)
+* `python3` (used by [`tools/godot-repack-helper.py`][godot-helper] for Godot `.ctex`/`.stex` and `.oggstr`/`.oggvorbisstr` re-encoding, Ren'Py WebP RIFF repair, and [`rpatool`][rpatool])
+* `pckt` (built from [`tools/pckt`][pckt] submodule for Godot `.pck` and embedded executable extraction/repacking)
+* `mono` / `nodejs` (only required if using external helper tools such as [`MvDecryptor`][MvDecryptor], `RgssDecryptor`, or [`soldata-decryptor`][decryptor])
 
 **Termux Quick Install:**
 ```bash
-pkg install bash coreutils ffmpeg imagemagick parallel
+pkg install bash coreutils ffmpeg imagemagick parallel python clang make openssl
+```
+
+**Building Bundled C Tools (`pckt`):**
+```bash
+git submodule update --init --recursive
+make -C tools/pckt && make -C tools/pckt install
 ```
 
 ## Features
@@ -37,19 +46,24 @@ pkg install bash coreutils ffmpeg imagemagick parallel
 Functionally, it performs the same core task as the original Windows script: it re-encodes media files into lightweight formats
 (WebP for images, Opus/Ogg/MP3 for audio, WebM/OGV for video) **without changing file extensions**, expecting the game engine to detect file types by header/content rather than extension.
 
-* **Multi-Engine Support:** Auto-detects and supports Ren'Py, RPG Maker (MV, MZ, VX Ace), and generic HTML/Other games.
+* **Multi-Engine Support:** Auto-detects and supports Godot (3 & 4), Ren'Py, RPG Maker (MV, MZ, VX Ace), and generic HTML/Other games.
+* **Godot 3 & 4 Asset Compaction (`MODE=Godot`):**
+  * Automatically detects `.pck` archives, `project.godot`, or single-binary executables containing embedded `GDPC` payloads.
+  * Unpacks and repacks `.pck` files and bundled executables directly from the menu via [`pckt`][pckt], preserving the exact original PCK format (`v1`–`v4`) and Godot engine version (`--copy-meta` and `--embed`).
+  * Uses [`tools/godot-repack-helper.py`][godot-helper] to unpack and re-encode compiled Godot textures (`.ctex` `GST2` and `.stex` `GDST` with embedded WebP/PNG payloads, repairing obfuscated WebP RIFF headers automatically while skipping GPU-compressed `BasisU`/`BPTC` textures) and compiled Vorbis audio streams (`.oggstr` and `.oggvorbisstr` `OggPacketSequence` containers).
+  * Transcodes unimported audio to Vorbis `.ogg` (`AudioStreamOggVorbis`) and video to `.ogv` (`VideoStreamTheora`).
 * **Native RPG Maker MV & MZ Detection:** Automatically recognizes both MV (`./www/data/System.json`) and MZ (`./data/System.json`) folder layouts without manual directory restructuring.
-* **Standalone & Portable:** Runs as a single standalone script that can be dropped directly into a game folder or installed globally (with optional symlinks like `RenCruncher`, `RPGMCruncher`, `AceCruncher`, or `OtherCruncher` to force a specific mode).
-* **Zero Python Core:** Depends only on standard open-source packages; Ren'Py's `webp-header-fix` is built natively using GNU coreutils (`dd`/`stat`).
+* **Standalone & Portable:** Runs as a standalone script (with optional symlinks like `GodotCruncher`, `RenCruncher`, `RPGMCruncher`, `AceCruncher`, or `OtherCruncher` to force a specific mode) and auto-discovers helper scripts inside `tools/`.
+* **60-Column TUI Output:** Keeps menus, banners, runtime parameters, and progress meters neatly aligned within 60 columns for narrow terminals and mobile screens.
 * **Safe Overwrites:** Never deletes files blindly—only overwrites the original if conversion succeeds and the new file is strictly smaller, while preserving original file permissions and timestamps.
-* **TUI Progress & ETA:** Displays real-time terminal title progress, a progress bar with ETA in sequential mode, and a `--bar` progress meter when using GNU Parallel.
 * **Mobile & Emulator Compatibility (Termux / JoiPlay / MaldiVes):**
-  * **720p Max Dimension Cap (`-r` / `MAX_DIM`):** Downscales oversized videos and images (such as CGs, backgrounds, and parallaxes) to `720px` max without upscaling smaller files, while automatically skipping `RPGM` sprite sheets, tilesets, faces, and UI folders so grid coordinates remain intact.
+  * **720p Max Dimension Cap (`-r` / `MAX_DIM`):** Downscales oversized videos and non-grid images (such as CGs, backgrounds, and parallaxes) to `720px` max without upscaling smaller files, while skipping `RPGM` sprite sheets/tilesets/faces/UI and preserving Godot `.ctex`/`.stex` dimensions.
   * **Lossless WebP Alpha (`alpha-quality=100`):** Preserves exact transparency on soft glows, shadows, fog, and UI overlays while compressing RGB channels.
-  * **Mobile-Safe Video & Audio:** Outputs 8-bit `yuv420p` VP9 video with even dimensions, `120`-frame keyframe intervals for responsive seeking, and `20` ms Opus audio frames; skips `.gif` files in `RPGM` mode to prevent animated WebP glitches in Android WebViews.
+  * **Mobile-Safe Video & Audio:** Outputs 8-bit `yuv420p` VP9 video with even dimensions, `120`-frame keyframe intervals for responsive seeking, and `20` ms Opus audio frames; skips `.gif` files in `RPGM` and `Godot` modes to prevent animated WebP glitches.
 * **Fast Single-Pass Mobile VP9 (`-a`):** Uses tuned single-pass `libvpx-vp9` (`-speed 5`, `-tile-columns 2`) for 4x–6x faster video encoding on mobile ARM CPUs (with 2-pass `libvpx-vp9` as the default when `-a` is omitted).
 * **Built-in Archive & Decryption Integration:**
-  * If [rpatool][rpatool] is detected, unpacks and repacks Ren'Py `.rpa` archives directly from the menu.
+  * If [`pckt`][pckt] is detected, unpacks and repacks Godot `.pck` archives and embedded executables directly from the menu.
+  * If [`rpatool`][rpatool] (`tools/rpatool/rpatool.py`) is detected, unpacks and repacks Ren'Py `.rpa` archives directly from the menu.
   * If [`MvDecryptor`][MvDecryptor] is detected, decrypts RPG Maker MV/MZ assets (`.rpgmvp`/`.png_`, `.rpgmvo`/`.ogg_`, `.rpgmvm`/`.m4a_`) directly from the menu using low-memory chunked streaming, case-insensitive path resolution, and automatic PNG header key detection.
   * If [`RgssDecryptor`][RgssDecryptor script] is detected, unpacks RPGM VX Ace `Game.rgss3a` archives directly from the menu.
 * **See Also:** [Alternative tool RPGM MV/MZ][Alternative tool Rpgm MV MZ], [Alternative tool RPGM VX Ace][Alternative tool Rpgm VX Ace], and [Alternative tool Ren'Py][Alternative tool RenPy].
@@ -78,8 +92,8 @@ You can pass configuration either as **CLI flags** (`./cruncher -m RPGM -a -q 80
 
 | Flag | Env Variable | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `-m MODE` | `MODE` | *(auto)* | Target engine: `RenPy`, `RPGM`, `Ace`, or `Other`. Auto-detected by folder layout or script symlink name if omitted. |
-| `-d DIR` | `GAMEDIR` | *(by mode)* | Target resource folder (`./game` for Ren'Py, `./www` or `.` for RPGM MV/MZ, `.` for Ace/Other). |
+| `-m MODE` | `MODE` | *(auto)* | Target engine: `Godot`, `RenPy`, `RPGM`, `Ace`, or `Other`. Auto-detected by folder layout or script symlink name if omitted. |
+| `-d DIR` | `GAMEDIR` | *(by mode)* | Target resource folder (`./game` for Ren'Py, `./www` or `.` for RPGM MV/MZ, `.` for Godot/Ace/Other). |
 | `-q QUAL` | `QUALITY` | `80` | WebP/JPEG compression quality percentage (`1`–`100`). |
 | `-w METH` | `WMETHOD` | `5` | [WebP compression method][WebP method] (`0`–`6`). Higher values give better compression at slower speeds (`6` is noticeably slower than `5`). |
 | `-o OPAC` | `OPACITY` | `20480` | PNG alpha transparency threshold (`0`–`65535`, default `20480` ≈ `16.5%`) used in `Ace` mode to decide between PNG and smaller JPEG files. |
@@ -91,29 +105,42 @@ You can pass configuration either as **CLI flags** (`./cruncher -m RPGM -a -q 80
 | `-a` | `ACCEL` | `false` | Enable fast single-pass mobile VP9 video encoding (`-speed 5`). When `false`, uses higher-compression 2-pass VP9 (`-speed 3`). |
 | `-v` | `VPARALLEL` | `false` | Force parallel CPU video encoding across multiple files simultaneously (requires GNU `parallel`). |
 | `-1` | `PARALLEL_` | *(auto)* | Disable GNU Parallel (`-`), or set `PARALLEL_` env var to a custom `parallel` binary path. |
+| `-h` / `--help` | — | — | Print the 60-column CLI usage summary and exit. |
 | — | `FFMPEG` | *(auto)* | Path to the `ffmpeg` executable. |
 | — | `CONVERT` | *(auto)* | Path to the ImageMagick executable (prefers `magick`, falls back to `convert`). |
-| — | `RPATOOL` | *(auto)* | Path to [rpatool][rpatool] (`rpatool` or `rpatool.py`) for `.rpa` archive operations. |
-| — | `MVDECRYPTOR` | *(auto)* | Path to [MvDecryptor][MvDecryptor] for RPGM MV/MZ asset decryption. |
-| — | `RGSSDECRYPTOR` | *(auto)* | Path to [RgssDecryptor][RgssDecryptor script] for RPGM VX Ace archive extraction. |
-
-> [!TIP]
-> Passing `-h` or any unrecognized option prints the built-in CLI usage summary.
+| — | `PYTHON3` | *(auto)* | Path to `python3` for [`godot-repack-helper.py`][godot-helper] and [`rpatool`][rpatool]. |
+| — | `GODOT_HELPER` | *(auto)* | Path to [`tools/godot-repack-helper.py`][godot-helper] for `.ctex`/`.stex` and `.oggstr`/`.oggvorbisstr` compaction. |
+| — | `PCKT` | *(auto)* | Path to [`pckt`][pckt] for Godot `.pck` and embedded executable extraction/repacking. |
+| — | `RPATOOL` | *(auto)* | Path to [`rpatool`][rpatool] (`tools/rpatool/rpatool.py`) for `.rpa` archive operations. |
+| — | `MVDECRYPTOR` | *(auto)* | Path to [`MvDecryptor`][MvDecryptor] for RPGM MV/MZ asset decryption. |
+| — | `RGSSDECRYPTOR` | *(auto)* | Path to [`RgssDecryptor`][RgssDecryptor script] for RPGM VX Ace archive extraction. |
 
 ### Usage (tl;dr)
 
-1. Install required packages: `bash`, `ffmpeg`, and `imagemagick` (plus `parallel` for faster multi-core processing).
+1. Install required packages: `bash`, `ffmpeg`, and `imagemagick` (plus `parallel`, `python3`, and [`pckt`][pckt] for multi-core processing and Godot archive support).
 2. Copy `cruncher` to `/usr/bin/` (or `$PREFIX/bin/` on Termux) and mark it executable (`chmod +x`).
-3. Navigate to your unpacked game directory and run:
+3. Navigate to your game directory and run:
    ```bash
    cruncher
    ```
    * Recommended for Termux / JoiPlay / MaldiVes (fast single-pass VP9 + 720p cap): `cruncher -a`
-   * To force a specific engine mode: `cruncher RenPy` (or `RPGM`, `Ace`, `Other`).
+   * To force a specific engine mode: `cruncher Godot` (or `RenPy`, `RPGM`, `Ace`, `Other`).
    * To disable resolution downscaling: `cruncher -r 0`
    * For parallel multi-file CPU video compression (desktop/high-RAM systems): `cruncher -v`
 
 ---
+
+## How to compress Godot games
+
+Cruncher supports both **Godot 3** (`.stex` / `.oggstr`, PCK v1) and **Godot 4** (`.ctex` / `.oggvorbisstr`, PCK v2–v4), including single-binary exports where the `.pck` payload is embedded inside the game executable:
+
+1. Build and install [`pckt`][pckt] from `tools/pckt` (`make -C tools/pckt && make -C tools/pckt install`) and ensure `python3` is installed so [`tools/godot-repack-helper.py`][godot-helper] is available.
+2. Navigate to the Godot game folder and run `cruncher` (automatically detects `Godot` mode via `*.pck`, `project.godot`, or an embedded `GDPC` executable).
+3. Select **`x`** (**Extract `*.pck` / embedded exe**) from the menu.
+   * Cruncher unpacks the archive into `<game>.pck~/` and keeps a `.bak` copy of the original `.pck` or executable as a metadata reference.
+4. Select **`5`** (**All Media**) to compact `.ctex`/`.stex` textures, `.oggstr`/`.oggvorbisstr` audio streams, and any unimported media inside the extracted folder.
+5. Select **`c`** (**Repack `*.pck/`**) from the menu.
+   * Cruncher calls `pckt pack --copy-meta` (and `--embed` for single-binary executables) against the `.bak` reference so the repacked game retains its exact original PCK version and Godot engine version (required by JoiPlay's Godot 3 / Godot 4 plugins), then cleans up the temporary folder and backup.
 
 ## How to compress RPG Maker MZ games
 
@@ -171,13 +198,13 @@ RgssDecryptor --proj Game.rgss3a
 ## How to compress RPG Maker MV games with .soldata files
 
 1. Install [NodeJS][NodeJS].
-2. Download the [soldata-decryptor][decryptor] archive (adapted for Linux from [this post][decryptor comment]).
-3. Unpack it to `/usr/share/soldata-decryptor/`.
-4. Symlink the script to your `$PATH`:
+2. Initialize the bundled [`tools/soldata-decryptor`][decryptor] submodule (or symlink it into your `$PATH`):
    ```bash
-   ln -s "$PREFIX/share/soldata-decryptor/soldata-decryptor" "$PREFIX/bin/soldata-decryptor"
+   git submodule update --init tools/soldata-decryptor
+   chmod +x tools/soldata-decryptor/soldata-decryptor
+   ln -sf "$PWD/tools/soldata-decryptor/soldata-decryptor" "$PREFIX/bin/soldata-decryptor"
    ```
-5. Run `soldata-decryptor` inside the game directory, then run `cruncher` as usual.
+3. Run `soldata-decryptor` inside the game directory, then run `cruncher` as usual.
 
 If the game fails to boot after compression, try deleting `www/data/precachelist.json`, or inspect `www/js/main.js` (the only difference from `www/js/main.js~` should be a `DataManager.loadDatabase` section added after `PluginManager.setup($plugins);`).
 
@@ -209,9 +236,10 @@ Otherwise:
 
 
 [Cruncher]: https://f95zone.to/threads/cruncher.10227/
-[webp-header-fix]: tools/webp-header-fix.py
+[godot-helper]: tools/godot-repack-helper.py
+[pckt]: tools/pckt
 [parallel]: https://www.gnu.org/software/parallel/
-[rpatool]: https://github.com/ddCeka/rpatool
+[rpatool]: tools/rpatool
 [MvDecryptor]: tools/mvdecryptor
 [RgssDecryptor script]: tools/rgssdecryptor
 [WebP method]: https://manpages.debian.org/testing/webp/cwebp.1.en.html#m
@@ -224,8 +252,7 @@ Otherwise:
 [q4wine]: https://q4wine.brezblock.org.ua/screenshots
 [winetricks]: https://github.com/Winetricks/winetricks#installing
 [NodeJS]: https://nodejs.org/
-[decryptor]: https://github.com/ddCeka/soldata-decryptor
-[decryptor comment]: https://f95zone.to/threads/school-of-lust.6555/post-5448092
+[decryptor]: tools/soldata-decryptor
 [asar]: https://www.npmjs.com/package/@electron/asar
 [Electron]: https://github.com/electron/electron/releases
 [Asar alternative]: https://github.com/ddCeka/asar
