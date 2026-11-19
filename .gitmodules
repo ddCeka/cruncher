@@ -22,3 +22,6 @@
 [submodule "tools/pckt"]
 	path = tools/pckt
 	url = git@github.com:ddCeka/pck-tool.git
+[submodule "tools/unrpa"]
+	path = tools/unrpa
+	url = git@github.com:ddCeka/unrpa.git
