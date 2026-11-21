@@ -25,3 +25,6 @@
 [submodule "tools/unrpa"]
 	path = tools/unrpa
 	url = git@github.com:ddCeka/unrpa.git
+[submodule "tools/rgss-cli"]
+	path = tools/rgss-cli
+	url = git@github.com:ddCeka/rgss-decryptor-cli.git
