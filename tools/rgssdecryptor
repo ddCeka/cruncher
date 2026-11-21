@@ -1,2 +1,12 @@
 #!/usr/bin/env sh
-exec mono "${PREFIX:-/usr}/lib/rpgm/RgssDecrypter.exe" "$@"
+
+NATIVE_BIN="${PREFIX:-/usr}/bin/rgssdecrypter"
+EXE="${PREFIX:-/usr}/lib/rpgm/RgssDecrypter.exe"
+
+if [ -x "$NATIVE_BIN" ] && [ ! -d "$NATIVE_BIN" ]; then
+  exec "$NATIVE_BIN" "$@"
+elif [ -f "$EXE" ] && command -v mono >/dev/null 2>&1; then
+  exec mono "$EXE" "$@"
+else
+  exit 1
+fi

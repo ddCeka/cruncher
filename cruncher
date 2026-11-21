@@ -391,7 +391,7 @@ END
     fi
     if [ "$MODE" = Ace ] && [ -n "$RGSSDECRYPTOR" ]; then
         cat <<END
-  r) Extract Game.rgss3a (irreversible)
+  r) Extract *.rgss* archive (irreversible)
 END
     fi
     if [ "$MODE" = Godot ] && [ -n "$PCKT" ]; then
@@ -585,16 +585,19 @@ function mv-decrypt {
 }
 
 function rgss-unpack {
-    local FILE
-    FILE="$(locate ./Game.rgss3a)"
-    FILE="${FILE#./}"
+    local FILE ext
+    for ext in rgss3a rgss2a rgssad; do
+        FILE="$(locate "$GAMEDIR/*.$ext")"
+        [ -f "$FILE" ] && break
+    done
+
     local MSG
     if [ ! -f "$FILE" ]; then
-        MSG="Game.rgss3a not found. Press Enter..."
+        MSG="No .rgss3a / .rgss2a / .rgssad archive found. Press Enter..."
     else
         "$RGSSDECRYPTOR" --proj "$FILE" && rm --verbose --interactive=never "$FILE" \
-            && MSG="Unpacked '$FILE'. Press Enter..." \
-            || MSG="Failed unpacking '$FILE'. Press Enter..."
+            && MSG="Unpacked '$(basename "$FILE")'. Press Enter..." \
+            || MSG="Failed unpacking '$(basename "$FILE")'. Press Enter..."
     fi
     read -r -p "$MSG"
 }
