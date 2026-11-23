@@ -8,7 +8,7 @@ shopt -s nullglob   # unmatched globs expand to empty list
 
 declare -A COUNT    # associative array
 
-VERSION="v0.5.4"
+VERSION="v0.5.5"
 COLS=60
 HR="------------------------------------------------------------"
 
